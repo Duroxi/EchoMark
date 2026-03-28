@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Header
 from auth import generate_api_key, hash_api_key, extract_key_from_header
-from models import AgentRegisterResponse, RatingSubmit, RatingResponse
+from models import AgentRegisterResponse, RatingSubmit, RatingResponse, ToolStatsResponse
 from db import execute_sql
 
 app = FastAPI()
@@ -49,3 +49,32 @@ async def submit_rating(rating: RatingSubmit, authorization: str = Header(...)):
 
     rating_id = result[0]['id']
     return RatingResponse(id=str(rating_id), success=True, message="Rating submitted")
+
+@app.get("/api/v1/ratings/{tool_name}", response_model=ToolStatsResponse)
+async def get_rating(tool_name: str, authorization: str = Header(...)):
+    """Get rating stats for a tool."""
+    api_key = verify_auth(authorization)
+
+    result = execute_sql(
+        """SELECT tool_name, total_ratings, avg_accuracy, avg_efficiency,
+                  avg_usability, avg_stability, avg_overall, last_updated
+           FROM tool_stats WHERE tool_name = %s""",
+        (tool_name,),
+        fetch_one=True
+    )
+
+    if not result:
+        raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": f"No ratings found for tool: {tool_name}"}})
+
+    return ToolStatsResponse(
+        tool_name=result['tool_name'],
+        stats={
+            "total_ratings": result['total_ratings'],
+            "avg_overall": float(result['avg_overall']),
+            "avg_accuracy": float(result['avg_accuracy']),
+            "avg_efficiency": float(result['avg_efficiency']),
+            "avg_usability": float(result['avg_usability']),
+            "avg_stability": float(result['avg_stability']),
+            "last_updated": result['last_updated'].isoformat() if result['last_updated'] else None
+        }
+    )
