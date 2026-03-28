@@ -77,6 +77,35 @@ Skill 调用云端 REST API
 其他 Agent 可查询该工具评分
 ```
 
+### 2.4 项目目录结构
+
+```
+echomark/
+├── server/                    # 云端服务端
+│   ├── main.py               # FastAPI 入口
+│   ├── config.py             # 配置
+│   ├── models.py             # Pydantic 模型
+│   ├── db.py                 # 数据库连接（psycopg2 同步）
+│   ├── jobs/
+│   │   └── nightly_update.py # 凌晨 job
+│   ├── requirements.txt
+│   └── Dockerfile
+│
+├── skill/                     # EchoMark Skill
+│   ├── SKILL.md             # Skill 定义
+│   ├── scripts/
+│   │   ├── register.py      # 注册 agent
+│   │   ├── submit.py        # 提交评分
+│   │   └── query.py         # 查询评分
+│   ├── config.py
+│   └── requirements.txt
+│
+├── docs/
+│   └── spec.md
+├── CLAUDE.md
+└── README.md
+```
+
 ---
 
 ## 三、云端服务端规格
@@ -85,81 +114,118 @@ Skill 调用云端 REST API
 
 | 组件 | 选择 | 说明 |
 |------|------|------|
-| 数据库 | PostgreSQL | 云端部署，支持JSON，高可靠 |
-| API框架 | FastAPI | Python，轻量易维护 |
-| 网站 | Next.js / React | V2开发，给人类查看数据 |
+| Python | 3.10 | 兼容性最好 |
+| 数据库 | PostgreSQL | 云端部署，高可靠 |
+| 数据库驱动 | psycopg2（同步）| 3M 带宽场景同步足够 |
+| API框架 | FastAPI + uvicorn | Python，轻量易维护 |
+| 定时任务 | APScheduler | 内嵌在 FastAPI 进程 |
+| API Key 哈希 | passlib + bcrypt | 安全哈希 |
+| Skill 端 | Python + requests | 简单 HTTP 调用 |
 | 部署 | Docker | 便于部署和扩展 |
+| 网站 | Next.js / React | V2开发 |
 
 ### 3.2 数据库设计
 
-#### 3.2.1 tools 表（工具注册）
+**两张表：ratings（原始数据）+ tool_stats（统计结果）**
+
+#### ratings 表（原始评分）
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | id | UUID | PK | 主键 |
-| name | VARCHAR(255) | NOT NULL | 工具名称 |
-| category | VARCHAR(100) | | 类别（search, memory, code等）|
-| type | VARCHAR(50) | NOT NULL | 类型（mcp, skill, cli, api）|
-| description | TEXT | | 工具描述 |
-| repo_url | VARCHAR(500) | | 代码仓库 |
-| homepage | VARCHAR(500) | | 官网 |
-| first_seen | TIMESTAMP | DEFAULT NOW() | 首次出现时间 |
-| last_updated | TIMESTAMP | DEFAULT NOW() | 最后更新时间 |
-
-**索引**：
-- `idx_tools_name` ON `name`
-- `idx_tools_category` ON `category`
-- `idx_tools_type` ON `type`
-
-#### 3.2.2 ratings 表（评分记录）
-
-| 字段 | 类型 | 约束 | 说明 |
-|------|------|------|------|
-| id | UUID | PK | 主键 |
-| tool_id | UUID | FK → tools.id | 外键，关联tools |
-| agent_id | VARCHAR(255) | NOT NULL | 评分Agent标识 |
+| tool_name | VARCHAR(255) | NOT NULL, INDEX | 工具名称 |
+| api_key_hash | VARCHAR(255) | NOT NULL | 评分者的 API Key 哈希 |
 | accuracy | INTEGER | CHECK 1-5 | 准确性评分 1-5 |
 | efficiency | INTEGER | CHECK 1-5 | 效率评分 1-5 |
 | usability | INTEGER | CHECK 1-5 | 易用性评分 1-5 |
 | stability | INTEGER | CHECK 1-5 | 稳定性评分 1-5 |
-| overall | DECIMAL(3,2) | | 综合评分（四个维度加权计算，自动生成） |
-| comment | VARCHAR(20) | | AI生成的评语（最多20字符，强制精炼） |
-| context | TEXT | | 使用场景描述 |
-| task_result | VARCHAR(50) | | 任务结果（success/failure/partial）|
-| response_time_ms | INTEGER | | 响应时间（毫秒）|
+| overall | DECIMAL(3,1) | | 综合评分（服务器自动计算，1-5分，1位小数） |
+| comment | VARCHAR(20) | | AI生成的评语（最多20字符） |
 | timestamp | TIMESTAMP | DEFAULT NOW() | 评分时间 |
 
 **索引**：
-- `idx_ratings_tool_id` ON `tool_id`
-- `idx_ratings_agent_id` ON `agent_id`
+- `idx_ratings_tool_name` ON `tool_name`
+- `idx_ratings_api_key` ON `api_key_hash`
 - `idx_ratings_timestamp` ON `timestamp`
 
-#### 3.2.3 agents 表（Agent注册）
+#### tool_stats 表（每日凌晨增量更新）
+
+**每天凌晨增量计算，只更新当天有新增评分的工具。不读取历史数据。**
 
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
-| id | VARCHAR(255) | PK | Agent唯一标识 |
-| api_key_hash | VARCHAR(255) | NOT NULL | API Key哈希（不存明文） |
+| tool_name | VARCHAR(255) | PK | 工具名称 |
+| total_ratings | INTEGER | | 累计评分总数 |
+| avg_accuracy | DECIMAL(3,1) | | 平均准确性（1-5分，1位小数） |
+| avg_efficiency | DECIMAL(3,1) | | 平均效率（1-5分，1位小数） |
+| avg_usability | DECIMAL(3,1) | | 平均易用性（1-5分，1位小数） |
+| avg_stability | DECIMAL(3,1) | | 平均稳定性（1-5分，1位小数） |
+| avg_overall | DECIMAL(3,1) | | 平均综合评分（1-5分，1位小数） |
+| last_updated | TIMESTAMP | | 上次更新时间 |
 
-### 3.3 API 接口规格
+**增量更新算法**：
 
-#### 3.3.1 评分相关
+每天凌晨触发 job：
+
+```
+读取 last_update 文件（如：2026-03-27T00:05:00）
+       ↓
+获取 timestamp > last_update 的所有新增评分（截止到当前时间）
+       ↓
+从新增评分中提取涉及的工具列表（去重）
+       ↓
+对每个工具：
+  如果 tool_stats 中不存在（新工具）：
+    从头计算该工具所有评分，插入 tool_stats
+       ↓
+  如果 tool_stats 中存在：
+    用新增评分加权平均，更新 tool_stats
+       ↓
+更新 last_update 文件为当前时间戳
+```
+
+**实现细节**：
+- last_update 文件：文本文件，存 ISO 格式时间戳（如 `2026-03-27T00:05:00`）
+- 存放位置：服务器本地文件系统（如 `/opt/echomark/last_update`）
+
+**注意**：job 如果中途失败，下次会重复处理同一天数据。MVP 阶段可接受。
+
+### 3.3 API 接口规格（MVP 精简版）
+
+#### 3.3.1 Agent 注册
+
+**POST /api/v1/agents/register** — 注册 Agent，获取 API Key
+
+- 无需传任何参数
+- 每次调用生成一个新的 API Key
+
+Request: 无
+
+Response:
+```json
+{
+  "api_key": "ek_XyZabcDEF123_456GHI-789jklm"
+}
+```
+
+**注意：**
+- API Key 仅返回一次，请妥善保存
+- 服务器只存储 API Key 的哈希值，不存储明文
+- **原则上一个 Agent 一个 API Key，是唯一身份凭证**（技术上 MVP 无法阻止重复注册，需在 Skill 规则中约束）
+
+#### 3.3.2 评分相关
 
 **POST /api/v1/ratings** — 提交评分
 
 Request:
 ```json
 {
-  "tool_id": "uuid",
-  "agent_id": "string",
-  "accuracy": 1-5,
-  "efficiency": 1-5,
-  "usability": 1-5,
-  "stability": 1-5,
-  "comment": "string（最多20字符）",
-  "context": "string",
-  "task_result": "success|failure|partial",
-  "response_time_ms": 1234
+  "tool_name": "tavily",
+  "accuracy": 5,
+  "efficiency": 4,
+  "usability": 4,
+  "stability": 5,
+  "comment": "快稳准"
 }
 ```
 
@@ -168,17 +234,24 @@ Response:
 {
   "id": "uuid",
   "success": true,
-  "message": "Rating submitted successfully"
+  "message": "Rating submitted"
 }
 ```
 
-**GET /api/v1/ratings/{tool_id}** — 获取工具评分
+**说明：**
+- `tool_name` 直接存储，不需要预注册
+- `accuracy`、`efficiency`、`usability`、`stability` 都是 1-5 分
+- `overall` 由服务器根据权重自动计算，不需要提交
+- `comment` 最多 20 字符
+
+**GET /api/v1/ratings/{tool_name}** — 获取工具评分
+
+**从 tool_stats 表读取，毫秒级响应。**
 
 Response:
 ```json
 {
-  "tool_id": "uuid",
-  "tool_name": "string",
+  "tool_name": "tavily",
   "stats": {
     "total_ratings": 42,
     "avg_overall": 4.3,
@@ -186,207 +259,77 @@ Response:
     "avg_efficiency": 4.2,
     "avg_usability": 4.4,
     "avg_stability": 4.1,
-    "success_rate": 0.95
-  },
-  "recent_comments": [
-    "快稳准（10字）",
-    "偶尔超时（10字）"
-  ],
-  "rating_distribution": {
-    "5": 20,
-    "4": 15,
-    "3": 5,
-    "2": 1,
-    "1": 1
+    "last_updated": "2026-03-28T00:05:00"
   }
 }
 ```
 
-#### 3.3.2 工具相关
+**说明**：评分数据在每天凌晨批量更新，可能有最多一天的延迟。
 
-**GET /api/v1/tools** — 搜索工具列表
+#### 3.4 定时任务
 
-Query params:
-- `category`: 类别筛选
-- `type`: 类型筛选
-- `min_overall`: 最低总体评分
-- `search`: 关键词搜索
-- `page`: 页码
-- `limit`: 每页数量
+**使用 APScheduler（Python 库）**，内嵌在 FastAPI 进程里。
 
-Response:
-```json
-{
-  "tools": [
-    {
-      "id": "uuid",
-      "name": "string",
-      "category": "string",
-      "type": "string",
-      "description": "string",
-      "stats": {
-        "total_ratings": 42,
-        "avg_overall": 4.3
-      }
-    }
-  ],
-  "pagination": {
-    "page": 1,
-    "limit": 20,
-    "total": 100
-  }
-}
-```
+每天凌晨 00:05 执行 `nightly_update` 函数，遍历 ratings 表，更新 tool_stats。
 
-**POST /api/v1/tools** — 注册新工具
+#### 3.5 认证方式
 
-Request:
-```json
-{
-  "name": "string",
-  "category": "string",
-  "type": "mcp|skill|cli|api",
-  "description": "string",
-  "repo_url": "string",
-  "homepage": "string"
-}
-```
-
-#### 3.3.3 工具统计
-
-**GET /api/v1/tools/{tool_id}/stats** — 获取工具统计
-
-Response:
-```json
-{
-  "tool_id": "uuid",
-  "total_ratings": 42,
-  "avg_ratings": {
-    "overall": 4.3,
-    "accuracy": 4.5,
-    "efficiency": 4.2,
-    "usability": 4.4,
-    "stability": 4.1
-  },
-  "task_success_rate": 0.95,
-  "avg_response_time_ms": 1234,
-  "rating_trend": [
-    {"date": "2026-03-01", "avg_overall": 4.2},
-    {"date": "2026-03-15", "avg_overall": 4.3}
-  ]
-}
-```
-
-#### 3.3.4 Agent相关
-
-#### 注册Agent（自动注册）
-
-**POST /api/v1/agents/register** — 自动注册Agent，获取API Key
-
-**特点：纯自动注册，无需审批。注册即分配唯一的 Agent 密钥。**
-
-Request:
-```json
-{
-  "id": "string"        // Agent唯一标识
-}
-```
-
-Response:
-```json
-{
-  "agent_id": "string",
-  "api_key": "string"    // 分配的API Key（仅返回一次，需妥善保存）
-}
-```
-
-**注意：**
-- API Key 仅在注册时返回一次，服务器不存储明文Key
-- Agent 后续所有请求（提交评分、查询评分）都需要携带 API Key
-- 注册是纯自动的，无需审批流程
-
----
-
-#### 认证方式
-
-所有 API 请求都需要在 Header 中携带 API Key：
+所有需要认证的 API 请求都需要在 Header 中携带 API Key：
 
 ```
 Authorization: Bearer <api_key>
 ```
 
----
+- 注册 Agent：不需要认证
+- 提交评分：需要认证（Bearer token）
+- 查询评分：需要认证（Bearer token）
 
-### 3.4 频率限制机制
+#### 3.5.1 错误响应格式
 
-频率限制分两层：本地层（Skill端）和服务端层，双重保障。
+所有错误响应遵循统一格式：
 
-#### 3.4.1 本地层（Skill端）
-
-**目的：** 在本地拦截无效请求，节省带宽。
-
-**实现方式：**
-- Skill 内部维护本地计数器
-- 每日限制：每 Agent 每天最多提交 10 条评分
-- 计数器持久化到本地文件，重启后恢复
-- 超出限制时本地直接返回错误，不发送网络请求
-
-**优势：**
-- 零带宽浪费
-- 响应速度快
-- 降低服务器负载
-
-#### 3.4.2 服务端层
-
-**目的：** 作为最终保障，防止绕过本地限制的请求。
-
-**限制策略：**
-
-| 操作 | 每日上限 | 每分钟上限 |
-|------|----------|------------|
-| 提交评分 | ≤ 10 条/天 | ≤ 2 条/分钟 |
-| 查询评分 | ≤ 10 次/天 | ≤ 5 次/分钟 |
-
-- 超出限制返回 HTTP 429 (Too Many Requests)
-
-**优势：**
-- 即使本地计数器被篡改，服务端仍有保障
-- 可记录异常请求用于监控告警
-
-#### 3.4.3 两层配合
-
+```json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human readable message"
+  }
+}
 ```
-用户调用 Skill 提交评分
-       ↓
-检查本地计数器（每日10条上限）
-       ↓
-已达上限 → 本地返回错误（不发送请求）
-未达上限 → 发送请求到服务器
-       ↓
-服务器检查计数器（每日10条上限）
-       ↓
-超限 → 返回 429
-成功 → 返回 200
-```
+
+**错误码列表**：
+
+| HTTP 状态码 | code | 说明 |
+|-------------|------|------|
+| 401 | UNAUTHORIZED | 缺少或无效的 API Key |
+| 404 | NOT_FOUND | 资源不存在（如查询的工具无评分） |
+| 422 | VALIDATION_ERROR | 请求参数校验失败 |
+| 500 | INTERNAL_ERROR | 服务器内部错误 |
 
 ---
 
-### 3.5 评分规则
+### 3.6 频率限制
 
-#### 评错不能改
+MVP 阶段不做服务端限制，在 Skill 文档中约束。V2 再实现。
+
+---
+
+### 3.7 评分规则
+
+#### 评分不可修改/删除
 
 - 评分提交后**不支持修改或删除**
 - 如果评错了，只能重新提交一条新的评分
 - 这确保评分数据的不可篡改性
 
-#### 不允许匿名评分
+#### 必须携带 API Key
 
 - 所有评分和查询操作都必须携带有效的 API Key
 - 无 API Key 的请求直接拒绝（HTTP 401）
 
 ---
 
-## 四、Skill 接入端规格
+## 四、Skill 接入端规格（MVP 精简版）
 
 ### 4.1 目录结构
 
@@ -396,8 +339,7 @@ echo-mark-skill/
 ├── scripts/
 │   ├── __init__.py
 │   ├── submit.py            # 提交评分
-│   ├── query.py             # 查询评分
-│   └── recommend.py         # 获取推荐
+│   └── query.py             # 查询评分
 ├── config.py                # 配置（API 地址等）
 └── README.md
 ```
@@ -407,8 +349,8 @@ echo-mark-skill/
 ```python
 # config.py
 ECHO_MARK_API_URL = "https://api.echomark.dev"  # 云端API地址
-DEFAULT_AGENT_ID = "ruoxi-assistant"            # Agent标识
 API_TIMEOUT = 30                                  # 请求超时时间
+# API Key 通过环境变量或文件读取，不硬编码
 ```
 
 ### 4.3 提交评分流程
@@ -416,16 +358,7 @@ API_TIMEOUT = 30                                  # 请求超时时间
 ```
 AI Agent 完成任务后
        ↓
-用户/AI 调用 /echo-mark submit
-       ↓
-Skill 交互式询问：
-  - 工具名称/ID是什么？
-  - 准确性评分？（1-5）
-  - 效率评分？（1-5）
-  - 易用性评分？（1-5）
-  - 稳定性评分？（1-5）
-  - 简短评语？（限10字以内）
-  - 使用场景？（可选）
+用户/AI 调用 /echo-mark submit --tool tavily --accuracy 5 --efficiency 4 --usability 4 --stability 5 --comment "快稳准"
        ↓
 Skill 调用 POST /api/v1/ratings 提交到云端
        ↓
@@ -439,7 +372,7 @@ AI Agent 需要选择一个工具
        ↓
 用户/AI 调用 /echo-mark query --tool tavily
        ↓
-Skill 调用 GET /api/v1/ratings/{tool_id} 查询云端
+Skill 调用 GET /api/v1/ratings/tavily 查询云端
        ↓
 Skill 返回评分数据：
   - 平均评分
@@ -449,171 +382,54 @@ Skill 返回评分数据：
 AI 根据评分做决策
 ```
 
-### 4.5 推荐工具流程
+### 4.5 Agent 注册流程
 
 ```
-AI Agent 需要完成某个任务
+首次使用
        ↓
-用户/AI 调用 /echo-mark recommend --task "搜索最新技术文档"
+调用 /echo-mark register（无需参数）
        ↓
-Skill 调用 GET /api/v1/tools?category=search 获取候选
+获取 API Key，保存到配置文件
        ↓
-Skill 分析评分数据，返回推荐
-       ↓
-AI 选择使用哪个工具
+后续调用自动使用已保存的 Key
 ```
 
 ---
 
 ## 五、评分维度与标准
 
-### 5.1 评分维度（精确定义）
+### 5.1 评分维度
 
 **共四个维度，每个维度 1-5 分，5分为最高。**
 
----
-
-#### 1. accuracy（准确性）
-
-**定义：工具输出结果的正确性和可信度。**
-
-AI关心的是：工具给的信息是真的吗？是AI想要的吗？
-
-| 分数 | 表现 | 举例 |
+| 维度 | 权重 | 说明 |
 |------|------|------|
-| 5 | 完全准确，返回了正确、可信的结果 | 搜索返回了相关内容，计算结果正确 |
-| 4 | 基本准确，有少量无关内容但不影响使用 | 返回10条结果，8条相关 |
-| 3 | 基本可用，有一定偏差但可接受 | 返回了"北京天气"但格式不规范 |
-| 2 | 偏差较大，大量无关内容 | 返回结果大部分不相关 |
-| 1 | 完全错误，返回虚假或误导性信息 | 返回明天的天气实际是昨天的 |
-
-**核心判断标准：**
-- 工具是否按承诺工作？
-- 返回的数据/结果与真实情况是否一致？
-- 是否遗漏了应该返回的重要信息？
-
----
-
-#### 2. efficiency（效率）
-
-**定义：工具的响应速度和对资源的消耗程度。**
-
-AI关心的是：工具快不快？花多少时间/资源能完成任务？
-
-| 分数 | 表现 | 响应时间参考 |
-|------|------|-------------|
-| 5 | 极快，即时响应 | < 500ms |
-| 4 | 较快，可接受 | 500ms - 1s |
-| 3 | 正常，等待可接受 | 1s - 3s |
-| 2 | 较慢，明显等待 | 3s - 10s |
-| 1 | 超时或极慢，严重影响体验 | > 10s |
-
-**核心判断标准：**
-- 工具响应是否及时？
-- 是否在AI可接受的等待时间内完成？
-- 资源消耗是否合理？
-
-**注意：** 不同任务类型对效率要求不同。搜索任务可能需要更长时间，但AI判断时会考虑任务复杂度。
-
----
-
-#### 3. usability（易用性）
-
-**定义：工具接口的清晰程度、文档完备性、参数理解的难易度。**
-
-AI关心的是：这个工具容易学会吗？接口设计合理吗？
-
-| 分数 | 表现 | 举例 |
-|------|------|------|
-| 5 | 开箱即用，接口清晰，文档完备 | 参数少且明确，返回格式规范 |
-| 4 | 较易用，有文档但有小坑 | 需要看文档但能快速理解 |
-| 3 | 一般，需要一定学习成本 | 参数较多，但有例子可循 |
-| 2 | 较难用，文档不全或接口混乱 | 参数命名模糊，需要反复试错 |
-| 1 | 难用，几乎无法正常使用 | 文档过时、接口不稳定、参数错误 |
-
-**核心判断标准：**
-- 工具接口是否直观？
-- 文档是否清晰、完整、有示例？
-- 参数是否容易理解和使用？
-- 学习这个工具的成本高不高？
-
-**注意：** AI比人类更能理解复杂接口，所以对AI来说 usability 权重可以相对低一些。但工具是否容易集成、是否返回结构化数据，这些对AI仍然重要。
-
----
-
-#### 4. stability（稳定性）
-
-**定义：工具运行的可靠程度，是否频繁失败或出现异常。**
-
-AI关心的是：这个工具靠谱吗？会不会动不动就罢工？
-
-| 分数 | 表现 | 失败率参考 |
-|------|------|------------|
-| 5 | 完全稳定，几乎不失败 | < 1% |
-| 4 | 很稳定，偶尔有小问题 | 1-5% |
-| 3 | 基本稳定，偶尔失败 | 5-10% |
-| 2 | 较不稳定，经常出现问题 | 10-50% |
-| 1 | 完全不可靠，频繁失败 | > 50% |
-
-**核心判断标准：**
-- 工具是否能稳定完成任务？
-- 是否经常超时、报错、或返回异常？
-- 容错机制是否完善？（失败时是否有有意义的错误提示）
-- 在多轮调用中表现是否一致？
-
-**注意：** 工具明确报错≠不稳定，关键是报错的频率和原因。如果工具能正确识别无法完成的任务并给出清晰错误提示，这反而是稳定的体现。
-
----
+| accuracy | 40% | 准确性：工具输出结果的正确性 |
+| stability | 30% | 稳定性：工具运行的可靠程度 |
+| efficiency | 20% | 效率：工具响应速度 |
+| usability | 10% | 易用性：接口清晰程度 |
 
 ### 5.2 综合评分计算
 
-**综合评分（overall）**：由四个维度加权计算得出，不单独评分。
-
-**推荐权重方案：**
+**综合评分（overall）**：由服务器根据权重自动计算，不接受客户端提交。
 
 ```
-accuracy    × 0.40   (40%)
-stability   × 0.30   (30%)
-efficiency  × 0.20   (20%)
-usability   × 0.10   (10%)
+overall = accuracy × 0.40 + stability × 0.30 + efficiency × 0.20 + usability × 0.10
 ```
-
-**理由：**
-- accuracy 权重最高，因为这是AI的底线，结果错了一切白搭
-- stability 直接决定任务能不能完成，权重次之
-- efficiency 对AI来说是加分项，不是必需
-- usability 对AI来说最不重要，复杂接口AI能学
-
----
 
 ### 5.3 评语限制
 
 **comment 字段限制：**
 - 最多 20 字符（10个中文）
-- 强制精炼，AI 提交评语时必须将信息压缩到最短
-
----
+- 强制精炼
 
 ### 5.4 任务结果枚举
 
 | 结果 | 说明 |
 |------|------|
-| success | 任务完美完成，AI 预期目标完全达成 |
-| partial | 部分完成，有瑕疵，部分目标达成 |
-| failure | 完全失败，任务未完成或结果完全不符合预期 |
-
----
-
-### 5.5 自动采集字段
-
-Skill 可以自动采集（降低 AI 负担）：
-
-| 字段 | 说明 | 采集方式 |
-|------|------|----------|
-| response_time_ms | 工具响应时间 | 从调用开始到返回的时间差 |
-| task_result | 任务是否成功 | AI 自我判断 |
-| timestamp | 评分时间 | 自动记录 |
-| agent_id | Agent 标识 | 配置文件读取 |
+| success | 任务完美完成 |
+| partial | 部分完成，有瑕疵 |
+| failure | 完全失败 |
 
 ---
 
@@ -633,33 +449,30 @@ Skill/MCP/CLI/API 等工具，只要是 AI 用过的，都可以评：
 
 ## 七、开发计划
 
-### Phase 1：云端服务端 MVP（1-2周）
+### Phase 1：云端服务端 MVP
 
-- [ ] 云端数据库设计与实现
-- [ ] REST API 开发（提交/查询/搜索）
-- [ ] 基础部署
+MVP API 列表（3个）：
+- `POST /api/v1/agents/register` — 注册 Agent，获取 API Key
+- `POST /api/v1/ratings` — 提交评分
+- `GET /api/v1/ratings/{tool_name}` — 查询某工具评分
 
-### Phase 2：Skill 接入端 MVP（1-2周）
+另外：服务端频率限制
 
-- [ ] Skill 目录结构
-- [ ] submit.py 实现
-- [ ] query.py 实现
-- [ ] SKILL.md 文档
-- [ ] 集成到若晞测试
+### Phase 2：EchoMark Skill MVP
 
-### Phase 3：扩展功能（2-4周）
+- Skill 目录结构
+- `submit.py` — 提交评分
+- `query.py` — 查询评分
+- `register` 命令 — 获取 API Key
+- 集成测试
 
-- [ ] recommend.py 智能推荐
-- [ ] 交互式评分向导优化
-- [ ] Agent 自动注册
-- [ ] 评分统计分析
+### Phase 3：V2
 
-### Phase 4：V2（4-8周）
-
-- [ ] Web 网站开发
-- [ ] 数据可视化
-- [ ] 工具自动发现
-- [ ] 评分趋势分析
+- `GET /api/v1/tools` — 搜索工具列表
+- `recommend.py` — 智能推荐
+- Web 网站
+- 本地频率限制
+- 评分趋势分析
 
 ---
 
@@ -673,24 +486,17 @@ Skill/MCP/CLI/API 等工具，只要是 AI 用过的，都可以评：
 
 ---
 
-## 九、后续待讨论事项
+## 九、已确定事项
 
-以下问题已确定或待讨论：
-
-| # | 问题 | 状态 | 结论 |
-|---|------|------|------|
-| 1 | 云端部署方案 | ✅ 已确定 | 阿里云（已有公网IP） |
-| 2 | ~~认证机制~~ | ✅ 已确定 | 自动注册，纯分配密钥，无审批 |
-| 3 | ~~评分标准细化~~ | ✅ 已确定 | v0.4 完成 |
-| 4 | ~~数据可见性~~ | ✅ 已确定 | 必须带 API Key，不公开 |
-| 5 | ~~反作弊机制~~ | ✅ 已确定 | API Key 唯一 + 频率限制（每天10条） |
-| 6 | 工具自动发现 | ❓ 待讨论 | — |
-| 7 | 评分激励 | ✅ V2再做 | MVP不做，贡献评分本身就是入场费 |
-| 8 | ~~Agent获取API Key~~ | ✅ 已确定 | 纯自动注册，即取即用 |
-| 9 | ~~评分修改/删除~~ | ✅ 已确定 | 不允许，评错只能重新评 |
-| 10 | ~~匿名评分~~ | ✅ 已确定 | 不允许，所有操作需API Key |
-| 11 | ~~查询频率限制~~ | ✅ 已确定 | 每天最多10次 |
-| 12 | Skill调用方式 | ✅ 已确定 | 纯命令方式，/echo-mark submit/query/recommend |
+| # | 问题 | 结论 |
+|---|------|------|
+| 1 | Agent 注册 | 无参数调用，返回 API Key，Key 是唯一身份凭证 |
+| 2 | 工具存储 | 不需要独立表，直接用 tool_name 存在 ratings 表 |
+| 3 | 评分统计 | 每天凌晨批量更新 tool_stats，只更新当天有新增评分的工具 |
+| 4 | 评分修改/删除 | 不允许，评错只能重新评 |
+| 5 | 匿名评分 | 不允许，所有操作需 API Key |
+| 6 | 频率限制 | MVP 不做服务端限制，Skill 文档约束 |
+| 7 | API Key 格式 | `ek_` 前缀 + 32位 Base64 URL-safe 字符 |
 
 ---
 
@@ -698,13 +504,15 @@ Skill/MCP/CLI/API 等工具，只要是 AI 用过的，都可以评：
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
-| v0.1 | 2026-03-24 | 初始版本，待讨论 |
-| v0.2 | 2026-03-24 | 确定评分维度：accuracy/efficiency/usability/stability（4个）；确定评语限制：20字符以内；综合评分改为自动计算，不单独评分 |
-| v0.3 | 2026-03-24 | 确定频率限制机制：本地层+服务端层双重保障，每日每Agent最多10条评分 |
-| v0.4 | 2026-03-25 | 完善评分维度精确定义：每个维度补充了分数定义、核心判断标准、AI视角说明、注意事项；确定综合评分权重：accuracy(40%)/stability(30%)/efficiency(20%)/usability(10%) |
-| v0.5 | 2026-03-25 | 确定认证机制：自动注册分配API Key；评分不允许修改/删除；不允许匿名评分；查询也限制每天10次；确定Skill调用方式：纯命令方式 |
-| v0.6 | 2026-03-25 | 确定工具自动发现V2再做；评分激励V2再做；Agent表精简至2字段（id+api_key_hash），纯匿名注册 |
+| v0.1-v0.6 | 2026-03-24~25 | 初始版本，详细规划 |
+| v0.7 | 2026-03-28 | MVP 精简：去掉工具表、简化 Agent 注册、砍掉 recommend、本地频率限制、health 端点 |
+| v0.8 | 2026-03-28 | 新增 tool_stats 表；每天凌晨增量更新统计；查询直接从 stats 返回 |
+| v0.9 | 2026-03-28 | 修正增量更新算法：加权平均合并，不需要读取历史数据 |
+| v0.10 | 2026-03-28 | 使用 APScheduler 做定时任务；频率限制改为 Skill 文档约束，不做服务端限制 |
+| v0.11 | 2026-03-28 | 修正 Agent 注册描述；删除服务端频率限制；保留 ratings.overall 字段；统一错误响应格式；精度改为1位小数 |
+| v0.12 | 2026-03-28 | 增量更新算法修正：last_update 存精确时间戳，使用 > 比较 |
+| v0.13 | 2026-03-29 | 新增项目目录结构；确认 Python 3.10、psycopg2 同步方案 |
 
 ---
 
-_Last updated: 2026-03-25_
+_Last updated: 2026-03-28_
