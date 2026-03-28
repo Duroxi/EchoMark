@@ -1,9 +1,32 @@
 from fastapi import FastAPI, HTTPException, Header
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from auth import generate_api_key, hash_api_key, extract_key_from_header
 from models import AgentRegisterResponse, RatingSubmit, RatingResponse, ToolStatsResponse
 from db import execute_sql
 
 app = FastAPI()
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=422,
+        content={"error": {"code": "VALIDATION_ERROR", "message": str(exc)}}
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": "UNAUTHORIZED" if exc.status_code == 401 else "ERROR", "message": exc.detail}}
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": "INTERNAL_ERROR", "message": "Internal server error"}}
+    )
 
 @app.post("/api/v1/agents/register", response_model=AgentRegisterResponse)
 def register_agent():
