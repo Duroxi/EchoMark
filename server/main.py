@@ -78,3 +78,17 @@ async def get_rating(tool_name: str, authorization: str = Header(...)):
             "last_updated": result['last_updated'].isoformat() if result['last_updated'] else None
         }
     )
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from jobs.nightly_update import nightly_update
+
+scheduler = AsyncIOScheduler()
+scheduler.add_job(nightly_update, 'cron', hour=0, minute=5)
+
+@app.on_event("startup")
+async def startup():
+    scheduler.start()
+
+@app.on_event("shutdown")
+async def shutdown():
+    scheduler.shutdown()
