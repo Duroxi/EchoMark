@@ -51,22 +51,23 @@ def nightly_update():
             fetch_one=True
         )
 
-        if existing:
+        if existing is not None:
             old_total = existing['total_ratings']
             new_count = len(ratings)
             new_total = old_total + new_count
 
-            new_acc = sum(r['accuracy'] for r in ratings) / new_count
-            new_eff = sum(r['efficiency'] for r in ratings) / new_count
-            new_usa = sum(r['usability'] for r in ratings) / new_count
-            new_sta = sum(r['stability'] for r in ratings) / new_count
-            new_ovl = sum(r['overall'] for r in ratings) / new_count
+            new_acc = float(sum(r['accuracy'] for r in ratings) / new_count)
+            new_eff = float(sum(r['efficiency'] for r in ratings) / new_count)
+            new_usa = float(sum(r['usability'] for r in ratings) / new_count)
+            new_sta = float(sum(r['stability'] for r in ratings) / new_count)
+            new_ovl = float(sum(r['overall'] for r in ratings) / new_count)
 
-            avg_accuracy = round((existing['avg_accuracy'] * old_total + new_acc * new_count) / new_total, 1)
-            avg_efficiency = round((existing['avg_efficiency'] * old_total + new_eff * new_count) / new_total, 1)
-            avg_usability = round((existing['avg_usability'] * old_total + new_usa * new_count) / new_total, 1)
-            avg_stability = round((existing['avg_stability'] * old_total + new_sta * new_count) / new_total, 1)
-            avg_overall = round((existing['avg_overall'] * old_total + new_ovl * new_count) / new_total, 1)
+            # Convert Decimal to float for calculation
+            avg_accuracy = round((float(existing['avg_accuracy']) * old_total + new_acc * new_count) / new_total, 1)
+            avg_efficiency = round((float(existing['avg_efficiency']) * old_total + new_eff * new_count) / new_total, 1)
+            avg_usability = round((float(existing['avg_usability']) * old_total + new_usa * new_count) / new_total, 1)
+            avg_stability = round((float(existing['avg_stability']) * old_total + new_sta * new_count) / new_total, 1)
+            avg_overall = round((float(existing['avg_overall']) * old_total + new_ovl * new_count) / new_total, 1)
 
             execute_sql(
                 """UPDATE tool_stats SET
