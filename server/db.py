@@ -21,6 +21,7 @@ def execute_sql(sql: str, params: tuple = None, fetch_one=False, fetch_all=False
             cur.execute(sql, params)
             if fetch_one:
                 result = cur.fetchone()
+                conn.commit()
                 return dict(result) if result else None
             if fetch_all:
                 return [dict(row) for row in cur.fetchall()]
