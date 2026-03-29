@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from auth import generate_api_key, hash_api_key, extract_key_from_header
+from auth import generate_api_key, extract_key_from_header
 from models import AgentRegisterResponse, RatingSubmit, RatingResponse, ToolStatsResponse
 from db import execute_sql
 
@@ -30,16 +30,8 @@ async def general_exception_handler(request, exc):
 
 @app.post("/api/v1/agents/register", response_model=AgentRegisterResponse)
 def register_agent():
-    """Register a new agent and return API key."""
+    """Register a new agent and return API key. No DB operation for MVP."""
     api_key = generate_api_key()
-    api_key_hash = hash_api_key(api_key)
-
-    # Store hash in database (no lookup needed for MVP)
-    execute_sql(
-        "INSERT INTO ratings (tool_name, api_key_hash, accuracy, efficiency, usability, stability, overall, comment) VALUES ('__agent__', %s, 0, 0, 0, 0, 0, '__register__')",
-        (api_key_hash,)
-    )
-
     return AgentRegisterResponse(api_key=api_key)
 
 async def verify_auth(authorization: str = Header(...)):
@@ -52,7 +44,7 @@ async def verify_auth(authorization: str = Header(...)):
 @app.post("/api/v1/ratings", response_model=RatingResponse)
 async def submit_rating(rating: RatingSubmit, authorization: str = Header(...)):
     """Submit a rating for a tool."""
-    api_key = verify_auth(authorization)
+    api_key = await verify_auth(authorization)
 
     # Calculate overall score
     overall = (
@@ -67,16 +59,17 @@ async def submit_rating(rating: RatingSubmit, authorization: str = Header(...)):
         """INSERT INTO ratings (tool_name, api_key_hash, accuracy, efficiency, usability, stability, overall, comment)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
            RETURNING id""",
-        (rating.tool_name, api_key, rating.accuracy, rating.efficiency, rating.usability, rating.stability, overall, rating.comment)
+        (rating.tool_name, api_key, rating.accuracy, rating.efficiency, rating.usability, rating.stability, overall, rating.comment),
+        fetch_one=True
     )
 
-    rating_id = result[0]['id']
+    rating_id = result['id']
     return RatingResponse(id=str(rating_id), success=True, message="Rating submitted")
 
 @app.get("/api/v1/ratings/{tool_name}", response_model=ToolStatsResponse)
 async def get_rating(tool_name: str, authorization: str = Header(...)):
     """Get rating stats for a tool."""
-    api_key = verify_auth(authorization)
+    api_key = await verify_auth(authorization)
 
     result = execute_sql(
         """SELECT tool_name, total_ratings, avg_accuracy, avg_efficiency,
@@ -93,11 +86,11 @@ async def get_rating(tool_name: str, authorization: str = Header(...)):
         tool_name=result['tool_name'],
         stats={
             "total_ratings": result['total_ratings'],
-            "avg_overall": float(result['avg_overall']),
-            "avg_accuracy": float(result['avg_accuracy']),
-            "avg_efficiency": float(result['avg_efficiency']),
-            "avg_usability": float(result['avg_usability']),
-            "avg_stability": float(result['avg_stability']),
+            "avg_overall": float(result['avg_overall']) if result['avg_overall'] else 0.0,
+            "avg_accuracy": float(result['avg_accuracy']) if result['avg_accuracy'] else 0.0,
+            "avg_efficiency": float(result['avg_efficiency']) if result['avg_efficiency'] else 0.0,
+            "avg_usability": float(result['avg_usability']) if result['avg_usability'] else 0.0,
+            "avg_stability": float(result['avg_stability']) if result['avg_stability'] else 0.0,
             "last_updated": result['last_updated'].isoformat() if result['last_updated'] else None
         }
     )

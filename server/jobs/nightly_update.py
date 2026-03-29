@@ -51,7 +51,7 @@ def nightly_update():
             fetch_one=True
         )
 
-        if existing:
+        if existing is not None:
             old_total = existing['total_ratings']
             new_count = len(ratings)
             new_total = old_total + new_count

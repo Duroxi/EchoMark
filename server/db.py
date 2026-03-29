@@ -20,7 +20,8 @@ def execute_sql(sql: str, params: tuple = None, fetch_one=False, fetch_all=False
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(sql, params)
             if fetch_one:
-                return dict(cur.fetchone())
+                result = cur.fetchone()
+                return dict(result) if result else None
             if fetch_all:
                 return [dict(row) for row in cur.fetchall()]
             conn.commit()
