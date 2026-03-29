@@ -34,6 +34,7 @@ Core idea: When an AI Agent uses a tool (MCP server, skill, CLI, API), it submit
 
 | Component       | Technology     | Priority |
 |----------------|----------------|----------|
+| Python         | 3.10          | P0       |
 | Database       | PostgreSQL     | P0       |
 | API Framework  | FastAPI (Python)| P0     |
 | Skill          | Python scripts| P0       |
@@ -43,10 +44,10 @@ Core idea: When an AI Agent uses a tool (MCP server, skill, CLI, API), it submit
 ## Database Schema
 
 ### ratings table (raw ratings)
-- id (UUID PK), tool_name (VARCHAR, INDEX), api_key_hash, accuracy/efficiency/usability/stability (1-5), overall (computed), comment (≤20 chars), context, task_result, response_time_ms, timestamp
+- id (UUID PK), tool_name (VARCHAR, INDEX), api_key_hash, accuracy/efficiency/usability/stability (1-5), overall (computed), comment (≤20 chars), timestamp
 
 ### tool_stats table (batch updated daily at midnight)
-- tool_name (PK), total_ratings, avg_accuracy, avg_efficiency, avg_usability, avg_stability, avg_overall, success_rate, last_updated
+- tool_name (PK), total_ratings, avg_accuracy, avg_efficiency, avg_usability, avg_stability, avg_overall, last_updated
 
 ## Rating Dimensions
 
