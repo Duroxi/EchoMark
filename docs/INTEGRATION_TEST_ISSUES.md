@@ -38,6 +38,28 @@
 
 ---
 
+## 问题 5：Decimal 与 float 混合运算报错
+
+**状态**：✅ 已修复
+
+**原因**：PostgreSQL 返回的 Decimal 类型与 float 直接运算会报错
+
+**修复**：所有数值运算前先 `float()` 转换
+
+---
+
+## Skill 端测试结果
+
+| 测试项 | 结果 |
+|--------|------|
+| python -m scripts.register | ✅ 成功，API key 保存到 ~/.echomark/api_key |
+| python -m scripts.submit | ✅ 成功，评分提交成功 |
+| python -m scripts.query | ✅ 成功，返回统计信息 |
+
+**注意**：测试时确保只有一个 uvicorn 进程在运行
+
+---
+
 ## 测试结果
 
 | 测试项 | 结果 |
