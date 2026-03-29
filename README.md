@@ -113,13 +113,25 @@
 
 ---
 
-## 技术架构（待定）
+## 技术架构
 
-### 可能的实现方式
+### MVP 技术选型
 
-- **网站 + 数据库**：记录工具评分数据
-- **MCP 服务**：让 AI 可以查询和提交评分
-- **AI Agent Skill**：集成到各大 Agent 框架
+| 组件 | 选择 |
+|------|------|
+| 数据库 | PostgreSQL（ratings 表 + tool_stats 表）|
+| API | FastAPI (Python) |
+| Skill | Python 脚本 |
+
+### MVP API（3个）
+
+- `POST /api/v1/agents/register` — 注册 Agent，获取 API Key
+- `POST /api/v1/ratings` — 提交评分（直接带工具名）
+- `GET /api/v1/ratings/{tool_name}` — 查询工具评分（从 tool_stats 返回）
+
+### 统计更新机制
+
+每天凌晨批量更新 tool_stats，只对当天有新增评分的工具进行增量计算。
 
 ---
 
@@ -137,14 +149,18 @@
 
 ---
 
-## 里程碑
+## 开发里程碑
 
-- [ ] 确定技术方案
-- [ ] 设计数据库架构
-- [ ] 开发网站原型
-- [ ] 开发 MCP 服务
-- [ ] 集成第一个 AI Agent
-- [ ] 收录第一批工具评分
+### Phase 1: 云端服务端 MVP
+- [ ] 数据库设计（PostgreSQL）
+- [ ] API 开发（FastAPI）
+- [ ] 频率限制实现
+- [ ] 部署到阿里云
+
+### Phase 2: EchoMark Skill MVP
+- [ ] Skill 目录结构
+- [ ] submit/query 命令
+- [ ] 集成测试
 
 ---
 
@@ -156,4 +172,4 @@
 
 ---
 
-_Last updated: 2026-03-22_
+_Last updated: 2026-03-28_

@@ -1,0 +1,19 @@
+import sys
+sys.path.insert(0, 'server')
+
+from auth import generate_api_key, hash_api_key, verify_api_key, extract_key_from_header
+
+def test_generate_api_key():
+    key = generate_api_key()
+    assert key.startswith("ek_")
+    assert len(key) == 35  # "ek_" + 32 chars
+
+def test_hash_and_verify():
+    key = generate_api_key()
+    hashed = hash_api_key(key)
+    assert verify_api_key(key, hashed)
+    assert not verify_api_key("wrong_key", hashed)
+
+def test_extract_key_from_header():
+    assert extract_key_from_header("Bearer ek_abc123") == "ek_abc123"
+    assert extract_key_from_header("Basic abc") is None
