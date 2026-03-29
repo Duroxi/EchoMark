@@ -1,24 +1,50 @@
 """Integration tests for EchoMark Skill."""
 import os
 import tempfile
+import importlib.util
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-# Mock config before import
+# Load skill config directly
+config_path = os.path.join(os.path.dirname(__file__), '..', 'config.py')
+spec = importlib.util.spec_from_file_location("skill_config", config_path)
+skill_config = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(skill_config)
+
+# Create mock config directory and file path
 mock_config_dir = tempfile.mkdtemp()
 mock_api_key_file = os.path.join(mock_config_dir, "api_key")
 
+# Patch before importing scripts
 with patch.dict(os.environ, {"ECHO_MARK_API_URL": "http://test.local"}):
-    with patch("config.CONFIG_DIR", mock_config_dir):
-        with patch("config.API_KEY_FILE", mock_api_key_file):
+    with patch.object(skill_config, 'CONFIG_DIR', mock_config_dir):
+        with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
+            # Now import the scripts with patched config
+            import sys
+            scripts_path = os.path.join(os.path.dirname(__file__), '..')
+            sys.path.insert(0, scripts_path)
+
+            # Clear any cached imports
+            if 'scripts' in sys.modules:
+                del sys.modules['scripts']
+            if 'scripts.register' in sys.modules:
+                del sys.modules['scripts.register']
+            if 'scripts.submit' in sys.modules:
+                del sys.modules['scripts.submit']
+            if 'scripts.query' in sys.modules:
+                del sys.modules['scripts.query']
+
+            # Patch config in sys.modules for scripts to find
+            sys.modules['config'] = skill_config
+
             from scripts import register, submit, query
 
 
 class TestRegister:
     """Tests for register module."""
 
-    @patch("scripts.register.requests.post")
+    @patch("requests.post")
     def test_register_success(self, mock_post):
         """Test successful agent registration."""
         mock_response = MagicMock()
@@ -26,13 +52,14 @@ class TestRegister:
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
-        result = register.register()
+        with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
+            result = register.register()
 
         assert result["success"] is True
         assert result["api_key"] == "ek_test123"
         assert os.path.exists(mock_api_key_file)
 
-    @patch("scripts.register.requests.post")
+    @patch("requests.post")
     def test_register_saves_api_key(self, mock_post):
         """Test that register saves API Key to file."""
         mock_response = MagicMock()
@@ -40,7 +67,8 @@ class TestRegister:
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
-        register.register()
+        with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
+            register.register()
 
         with open(mock_api_key_file, "r") as f:
             saved_key = f.read().strip()
@@ -52,7 +80,6 @@ class TestSubmit:
 
     def test_load_api_key_file_not_found(self):
         """Test error when API Key file doesn't exist."""
-        # Use a non-existent path - must patch the module's local binding
         with patch("scripts.submit.API_KEY_FILE", "/nonexistent/path/api_key"):
             with pytest.raises(FileNotFoundError) as exc_info:
                 submit.load_api_key()
@@ -63,11 +90,11 @@ class TestSubmit:
         with open(mock_api_key_file, "w") as f:
             f.write("ek_test_key")
 
-        with patch("config.API_KEY_FILE", mock_api_key_file):
+        with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
             key = submit.load_api_key()
             assert key == "ek_test_key"
 
-    @patch("scripts.submit.requests.post")
+    @patch("requests.post")
     def test_submit_rating_success(self, mock_post):
         """Test successful rating submission."""
         mock_response = MagicMock()
@@ -78,7 +105,7 @@ class TestSubmit:
         with open(mock_api_key_file, "w") as f:
             f.write("ek_test_key")
 
-        with patch("config.API_KEY_FILE", mock_api_key_file):
+        with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
             result = submit.submit_rating(
                 tool_name="test_tool",
                 accuracy=5,
@@ -97,13 +124,12 @@ class TestQuery:
 
     def test_load_api_key_file_not_found(self):
         """Test error when API Key file doesn't exist."""
-        # Must patch the module's local binding, not config.API_KEY_FILE
         with patch("scripts.query.API_KEY_FILE", "/nonexistent/path/api_key"):
             with pytest.raises(FileNotFoundError) as exc_info:
                 query.load_api_key()
             assert "Run 'python -m scripts.register' first" in str(exc_info.value)
 
-    @patch("scripts.query.requests.get")
+    @patch("requests.get")
     def test_query_rating_success(self, mock_get):
         """Test successful rating query."""
         mock_response = MagicMock()
@@ -125,7 +151,7 @@ class TestQuery:
         with open(mock_api_key_file, "w") as f:
             f.write("ek_test_key")
 
-        with patch("config.API_KEY_FILE", mock_api_key_file):
+        with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
             result = query.query_rating("test_tool")
 
         assert result["tool_name"] == "test_tool"

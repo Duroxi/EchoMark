@@ -7,11 +7,9 @@ import tempfile
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
-# Setup temp file before import
-temp_dir = tempfile.mkdtemp()
-temp_file = os.path.join(temp_dir, "last_update")
-os.environ["LAST_UPDATE_FILE"] = temp_file
+import pytest
 
+# Import the module (it reads LAST_UPDATE_FILE at import time from db.py, not nightly_update.py)
 from jobs.nightly_update import read_last_update, write_last_update, nightly_update
 
 
@@ -20,26 +18,34 @@ class TestReadLastUpdate:
 
     def test_read_no_file(self):
         """文件不存在时返回默认时间"""
-        os.remove(temp_file) if os.path.exists(temp_file) else None
-        result = read_last_update()
-        assert result.year == 1970  # Default to 1970
+        with patch('jobs.nightly_update.LAST_UPDATE_FILE', '/nonexistent/path/last_update'):
+            result = read_last_update()
+            assert result.year == 1970  # Default to 1970
 
     def test_read_empty_file(self):
         """空文件返回默认时间"""
+        temp_dir = tempfile.mkdtemp()
+        temp_file = os.path.join(temp_dir, "last_update")
         with open(temp_file, "w") as f:
             f.write("")
-        result = read_last_update()
-        assert result.year == 1970
+
+        with patch('jobs.nightly_update.LAST_UPDATE_FILE', temp_file):
+            result = read_last_update()
+            assert result.year == 1970
 
     def test_read_valid_timestamp(self):
         """正确读取有效时间戳"""
+        temp_dir = tempfile.mkdtemp()
+        temp_file = os.path.join(temp_dir, "last_update")
         test_time = datetime(2026, 3, 28, 0, 5, 0)
         with open(temp_file, "w") as f:
             f.write(test_time.isoformat())
-        result = read_last_update()
-        assert result.year == 2026
-        assert result.month == 3
-        assert result.day == 28
+
+        with patch('jobs.nightly_update.LAST_UPDATE_FILE', temp_file):
+            result = read_last_update()
+            assert result.year == 2026
+            assert result.month == 3
+            assert result.day == 28
 
 
 class TestWriteLastUpdate:
@@ -47,26 +53,33 @@ class TestWriteLastUpdate:
 
     def test_write_creates_file(self):
         """写入时间戳创建文件"""
+        temp_dir = tempfile.mkdtemp()
+        temp_file = os.path.join(temp_dir, "last_update")
         test_time = datetime(2026, 3, 29, 0, 5, 0)
-        write_last_update(test_time)
-        assert os.path.exists(temp_file)
 
-        with open(temp_file, "r") as f:
-            content = f.read()
-        assert "2026-03-29" in content
+        with patch('jobs.nightly_update.LAST_UPDATE_FILE', temp_file):
+            write_last_update(test_time)
+            assert os.path.exists(temp_file)
+
+            with open(temp_file, "r") as f:
+                content = f.read()
+            assert "2026-03-29" in content
 
     def test_write_overwrites(self):
         """写入覆盖之前的内容"""
+        temp_dir = tempfile.mkdtemp()
+        temp_file = os.path.join(temp_dir, "last_update")
         time1 = datetime(2026, 3, 28, 0, 5, 0)
         time2 = datetime(2026, 3, 29, 0, 5, 0)
 
-        write_last_update(time1)
-        write_last_update(time2)
+        with patch('jobs.nightly_update.LAST_UPDATE_FILE', temp_file):
+            write_last_update(time1)
+            write_last_update(time2)
 
-        with open(temp_file, "r") as f:
-            content = f.read()
-        assert "2026-03-29" in content
-        assert "2026-03-28" not in content
+            with open(temp_file, "r") as f:
+                content = f.read()
+            assert "2026-03-29" in content
+            assert "2026-03-28" not in content
 
 
 class TestNightlyUpdate:
