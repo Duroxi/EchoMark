@@ -1,16 +1,16 @@
+#!/usr/bin/env python3
 """Register an AI Agent and obtain API Key."""
 import sys
-import json
 import os
-from pathlib import Path
+
+# Add current directory to path for config import
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import requests
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import ECHO_MARK_API_URL, API_TIMEOUT, CONFIG_DIR, API_KEY_FILE
 
 
-def register() -> dict:
+def register():
     """Register agent with EchoMark cloud service."""
     url = f"{ECHO_MARK_API_URL}/api/v1/agents/register"
 
@@ -26,7 +26,10 @@ def register() -> dict:
         f.write(api_key)
 
     # Set file permissions to user-only (Unix)
-    os.chmod(API_KEY_FILE, 0o600)
+    try:
+        os.chmod(API_KEY_FILE, 0o600)
+    except PermissionError:
+        pass  # Windows may not support this
 
     return {"success": True, "api_key": api_key}
 

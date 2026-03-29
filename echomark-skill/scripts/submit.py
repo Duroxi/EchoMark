@@ -1,33 +1,27 @@
+#!/usr/bin/env python3
 """Submit a tool rating to EchoMark."""
 import sys
 import os
-from pathlib import Path
+
+# Add current directory to path for config import
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import requests
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import ECHO_MARK_API_URL, API_TIMEOUT, API_KEY_FILE
 
 
-def load_api_key() -> str:
+def load_api_key():
     """Load API Key from config file."""
     if not os.path.exists(API_KEY_FILE):
         raise FileNotFoundError(
             f"API Key not found at {API_KEY_FILE}. "
-            "Run 'python -m scripts.register' first."
+            "Run './register.py' or 'python register.py' first."
         )
     with open(API_KEY_FILE, "r") as f:
         return f.read().strip()
 
 
-def submit_rating(
-    tool_name: str,
-    accuracy: int,
-    efficiency: int,
-    usability: int,
-    stability: int,
-    comment: str = "",
-) -> dict:
+def submit_rating(tool_name, accuracy, efficiency, usability, stability, comment=""):
     """Submit a tool rating."""
     api_key = load_api_key()
     url = f"{ECHO_MARK_API_URL}/api/v1/ratings"
@@ -51,7 +45,7 @@ def submit_rating(
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Submit a tool rating")
+    parser = argparse.ArgumentParser(description="Submit a tool rating to EchoMark")
     parser.add_argument("--tool", required=True, help="Tool name")
     parser.add_argument("--accuracy", type=int, required=True, choices=[1, 2, 3, 4, 5], help="Accuracy (1-5)")
     parser.add_argument("--efficiency", type=int, required=True, choices=[1, 2, 3, 4, 5], help="Efficiency (1-5)")
@@ -70,7 +64,7 @@ def main():
             stability=args.stability,
             comment=args.comment,
         )
-        print(f"Rating submitted successfully! ID: {result['id']}")
+        print(f"Rating submitted! ID: {result['id']}")
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

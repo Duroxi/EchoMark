@@ -3,8 +3,8 @@ import importlib.util
 import os
 import sys
 
-# Load config directly from the skill directory
-config_path = os.path.join(os.path.dirname(__file__), '..', 'config.py')
+# Load config directly from the scripts directory
+config_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'config.py')
 spec = importlib.util.spec_from_file_location("skill_config", config_path)
 skill_config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(skill_config)
@@ -17,7 +17,7 @@ API_KEY_FILE = skill_config.API_KEY_FILE
 
 def test_api_url_default():
     """测试默认 API URL"""
-    assert ECHO_MARK_API_URL == "https://api.echomark.dev"
+    assert ECHO_MARK_API_URL == "http://192.168.1.99:9527"
 
 
 def test_api_timeout():

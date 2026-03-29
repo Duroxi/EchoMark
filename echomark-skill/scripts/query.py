@@ -1,26 +1,27 @@
+#!/usr/bin/env python3
 """Query tool ratings from EchoMark."""
 import sys
 import os
-from pathlib import Path
+
+# Add current directory to path for config import
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import requests
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from config import ECHO_MARK_API_URL, API_TIMEOUT, API_KEY_FILE
 
 
-def load_api_key() -> str:
+def load_api_key():
     """Load API Key from config file."""
     if not os.path.exists(API_KEY_FILE):
         raise FileNotFoundError(
             f"API Key not found at {API_KEY_FILE}. "
-            "Run 'python -m scripts.register' first."
+            "Run './register.py' or 'python register.py' first."
         )
     with open(API_KEY_FILE, "r") as f:
         return f.read().strip()
 
 
-def query_rating(tool_name: str) -> dict:
+def query_rating(tool_name):
     """Query ratings for a specific tool."""
     api_key = load_api_key()
     url = f"{ECHO_MARK_API_URL}/api/v1/ratings/{tool_name}"
@@ -35,7 +36,7 @@ def query_rating(tool_name: str) -> dict:
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Query tool ratings")
+    parser = argparse.ArgumentParser(description="Query tool ratings from EchoMark")
     parser.add_argument("--tool", required=True, help="Tool name to query")
 
     args = parser.parse_args()

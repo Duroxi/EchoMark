@@ -6,8 +6,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-# Load skill config directly
-config_path = os.path.join(os.path.dirname(__file__), '..', 'config.py')
+# Load skill config directly from scripts directory
+config_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'config.py')
 spec = importlib.util.spec_from_file_location("skill_config", config_path)
 skill_config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(skill_config)
@@ -83,7 +83,7 @@ class TestSubmit:
         with patch("scripts.submit.API_KEY_FILE", "/nonexistent/path/api_key"):
             with pytest.raises(FileNotFoundError) as exc_info:
                 submit.load_api_key()
-            assert "Run 'python -m scripts.register' first" in str(exc_info.value)
+            assert "Run 'python register.py' first" in str(exc_info.value)
 
     def test_load_api_key_success(self):
         """Test loading API Key from file."""
@@ -127,7 +127,7 @@ class TestQuery:
         with patch("scripts.query.API_KEY_FILE", "/nonexistent/path/api_key"):
             with pytest.raises(FileNotFoundError) as exc_info:
                 query.load_api_key()
-            assert "Run 'python -m scripts.register' first" in str(exc_info.value)
+            assert "Run 'python register.py' first" in str(exc_info.value)
 
     @patch("requests.get")
     def test_query_rating_success(self, mock_get):
@@ -157,3 +157,35 @@ class TestQuery:
         assert result["tool_name"] == "test_tool"
         assert result["stats"]["total_ratings"] == 10
         assert result["stats"]["avg_overall"] == 4.5
+
+    @patch("requests.post")
+    def test_submit_rating_network_error(self, mock_post):
+        """Test submit rating network error."""
+        import requests
+        mock_post.side_effect = requests.RequestException("Network error")
+
+        with open(mock_api_key_file, "w") as f:
+            f.write("ek_test_key")
+
+        with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
+            with pytest.raises(requests.RequestException):
+                submit.submit_rating(
+                    tool_name="test_tool",
+                    accuracy=5,
+                    efficiency=4,
+                    usability=4,
+                    stability=5,
+                )
+
+    @patch("requests.get")
+    def test_query_rating_network_error(self, mock_get):
+        """Test query rating network error."""
+        import requests
+        mock_get.side_effect = requests.RequestException("Network error")
+
+        with open(mock_api_key_file, "w") as f:
+            f.write("ek_test_key")
+
+        with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
+            with pytest.raises(requests.RequestException):
+                query.query_rating("test_tool")

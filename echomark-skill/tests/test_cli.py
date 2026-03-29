@@ -8,7 +8,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 # Load skill config directly to avoid import conflicts
-config_path = os.path.join(os.path.dirname(__file__), '..', 'config.py')
+config_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'config.py')
 spec = importlib.util.spec_from_file_location("skill_config", config_path)
 skill_config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(skill_config)

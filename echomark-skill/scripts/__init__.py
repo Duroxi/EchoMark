@@ -1,1 +1,0 @@
-"""EchoMark Skill - AI Agent tool rating system."""
