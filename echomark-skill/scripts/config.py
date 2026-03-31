@@ -1,7 +1,7 @@
 """Configuration for EchoMark Skill."""
 import os
 
-ECHO_MARK_API_URL = os.environ.get("ECHO_MARK_API_URL", "http://192.168.1.99:9527")
+ECHO_MARK_API_URL = os.environ.get("ECHO_MARK_API_URL", "http://47.109.154.82:9527")
 API_TIMEOUT = 30  # seconds
 
 # API Key storage path
