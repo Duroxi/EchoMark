@@ -2,7 +2,7 @@ import os
 from datetime import datetime
 from db import execute_sql
 
-LAST_UPDATE_FILE = os.getenv("LAST_UPDATE_FILE", "/opt/echomark/last_update")
+LAST_UPDATE_FILE = os.getenv("LAST_UPDATE_FILE", "/home/ruoxi/.echomark/last_update")
 
 def read_last_update() -> datetime:
     """Read last update timestamp from file."""
