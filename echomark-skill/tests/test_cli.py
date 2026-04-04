@@ -32,12 +32,12 @@ class TestRegisterCLI:
     def test_register_main_success(self, mock_post):
         """Test register main normal call."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {"api_key": "ek_test123"}
+        mock_response.json.return_value = {"api_key": "ek_test123", "agent_type": "claude-code"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
         with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
-            with patch.object(sys, 'argv', ['register']):
+            with patch.object(sys, 'argv', ['register', '--type', 'claude-code']):
                 try:
                     register.main()
                 except SystemExit:
@@ -46,12 +46,23 @@ class TestRegisterCLI:
         mock_post.assert_called_once()
 
     @patch("requests.post")
+    def test_register_main_missing_type(self, mock_post):
+        """Test register without --type exits."""
+        with patch.object(sys, 'argv', ['register']):
+            try:
+                register.main()
+            except SystemExit:
+                pass
+
+        mock_post.assert_not_called()
+
+    @patch("requests.post")
     def test_register_main_network_error(self, mock_post):
         """Test register main network error."""
         import requests
         mock_post.side_effect = requests.RequestException("Network error")
 
-        with patch.object(sys, 'argv', ['register']):
+        with patch.object(sys, 'argv', ['register', '--type', 'claude-code']):
             try:
                 register.main()
             except SystemExit as e:

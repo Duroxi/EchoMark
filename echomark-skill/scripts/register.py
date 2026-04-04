@@ -10,11 +10,11 @@ import requests
 from config import ECHO_MARK_API_URL, API_TIMEOUT, CONFIG_DIR, API_KEY_FILE
 
 
-def register():
+def register(agent_type):
     """Register agent with EchoMark cloud service."""
     url = f"{ECHO_MARK_API_URL}/api/v1/agents/register"
 
-    response = requests.post(url, timeout=API_TIMEOUT)
+    response = requests.post(url, json={"agent_type": agent_type}, timeout=API_TIMEOUT)
     response.raise_for_status()
 
     data = response.json()
@@ -31,13 +31,20 @@ def register():
     except PermissionError:
         pass  # Windows may not support this
 
-    return {"success": True, "api_key": api_key}
+    return {"success": True, "api_key": api_key, "agent_type": data["agent_type"]}
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Register an AI Agent with EchoMark")
+    parser.add_argument("--type", required=True, help="Agent type (e.g., claude-code, openclaw)")
+
+    args = parser.parse_args()
+
     try:
-        result = register()
-        print(f"Successfully registered! API Key saved to {API_KEY_FILE}")
+        result = register(args.type)
+        print(f"Successfully registered as [{result['agent_type']}]! API Key saved to {API_KEY_FILE}")
         print(f"API Key: {result['api_key']}")
     except requests.RequestException as e:
         print(f"Registration failed: {e}", file=sys.stderr)

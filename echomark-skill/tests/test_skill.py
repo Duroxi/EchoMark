@@ -48,31 +48,47 @@ class TestRegister:
     def test_register_success(self, mock_post):
         """Test successful agent registration."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {"api_key": "ek_test123"}
+        mock_response.json.return_value = {"api_key": "ek_test123", "agent_type": "claude-code"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
         with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
-            result = register.register()
+            result = register.register("claude-code")
 
         assert result["success"] is True
         assert result["api_key"] == "ek_test123"
+        assert result["agent_type"] == "claude-code"
         assert os.path.exists(mock_api_key_file)
 
     @patch("requests.post")
     def test_register_saves_api_key(self, mock_post):
         """Test that register saves API Key to file."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {"api_key": "ek_saved_key"}
+        mock_response.json.return_value = {"api_key": "ek_saved_key", "agent_type": "claude-code"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
         with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
-            register.register()
+            register.register("claude-code")
 
         with open(mock_api_key_file, "r") as f:
             saved_key = f.read().strip()
         assert saved_key == "ek_saved_key"
+
+    @patch("requests.post")
+    def test_register_sends_agent_type(self, mock_post):
+        """Test that register sends agent_type in request body."""
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"api_key": "ek_test", "agent_type": "openclaw"}
+        mock_response.raise_for_status = MagicMock()
+        mock_post.return_value = mock_response
+
+        with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
+            register.register("openclaw")
+
+        mock_post.assert_called_once()
+        call_args = mock_post.call_args
+        assert call_args[1]["json"]["agent_type"] == "openclaw"
 
 
 class TestSubmit:
