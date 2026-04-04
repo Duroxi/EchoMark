@@ -20,9 +20,9 @@ def mock_db():
 
 @pytest.fixture
 def mock_verify_auth():
-    """Mock verify_auth to return a test API key (async)."""
+    """Mock verify_auth to return (api_key_hash, agent_type)."""
     with patch('main.verify_auth', new_callable=AsyncMock) as mock:
-        mock.return_value = 'ek_test_api_key_12345678901234'
+        mock.return_value = ('$2b$12$mock_hash_value_placeholder', 'claude-code')
         yield mock
 
 
@@ -31,23 +31,24 @@ def mock_verify_auth():
 @pytest.mark.asyncio
 async def test_register_agent_success(mock_db):
     """Test agent registration returns API key."""
-    mock_db.return_value = [{'id': 'test-uuid'}]
+    mock_db.return_value = {'id': 'test-uuid'}
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/v1/agents/register")
+        resp = await client.post("/api/v1/agents/register", json={"agent_type": "claude-code"})
 
     assert resp.status_code == 200
     data = resp.json()
     assert 'api_key' in data
+    assert data['agent_type'] == 'claude-code'
 
 
 @pytest.mark.asyncio
 async def test_register_agent_returns_ek_prefix(mock_db):
     """Test API Key starts with ek_ prefix."""
-    mock_db.return_value = [{'id': 'test-uuid'}]
+    mock_db.return_value = {'id': 'test-uuid'}
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/v1/agents/register")
+        resp = await client.post("/api/v1/agents/register", json={"agent_type": "claude-code"})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -57,14 +58,22 @@ async def test_register_agent_returns_ek_prefix(mock_db):
 @pytest.mark.asyncio
 async def test_register_agent_returns_35_chars(mock_db):
     """Test API Key is 35 characters long."""
-    mock_db.return_value = [{'id': 'test-uuid'}]
+    mock_db.return_value = {'id': 'test-uuid'}
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/v1/agents/register")
+        resp = await client.post("/api/v1/agents/register", json={"agent_type": "claude-code"})
 
     assert resp.status_code == 200
     data = resp.json()
     assert len(data['api_key']) == 35
+
+
+@pytest.mark.asyncio
+async def test_register_agent_requires_body(mock_db):
+    """Test registration without body returns 422."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/v1/agents/register")
+    assert resp.status_code == 422
 
 
 # ===== Submit Rating Tests =====
@@ -76,22 +85,20 @@ async def test_submit_rating_without_auth():
     Note: With FastAPI's Header() validation, missing headers return 422.
     This test verifies the HTTPException handler directly.
     """
-    # Create a mock request and HTTPException to test the handler
     mock_request = MagicMock()
-    exc = HTTPException(status_code=401, detail={"error": {"code": "UNAUTHORIZED", "message": "Invalid authorization header"}})
-
+    exc = HTTPException(status_code=401, detail="Invalid API key")
     response = await http_exception_handler(mock_request, exc)
-
     assert response.status_code == 401
     import json
     body = json.loads(response.body)
     assert body['error']['code'] == 'UNAUTHORIZED'
+    assert isinstance(body['error']['message'], str)
 
 
 @pytest.mark.asyncio
 async def test_submit_rating_invalid_bearer(mock_verify_auth, mock_db):
     """Test submit rating with invalid Bearer returns 401."""
-    mock_db.side_effect = HTTPException(status_code=401, detail={"error": {"code": "UNAUTHORIZED", "message": "Invalid authorization header"}})
+    mock_db.side_effect = HTTPException(status_code=401, detail="Invalid API key")
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post(
@@ -108,7 +115,7 @@ async def test_submit_rating_invalid_bearer(mock_verify_auth, mock_db):
 @pytest.mark.asyncio
 async def test_submit_rating_success(mock_db, mock_verify_auth):
     """Test successful rating submission."""
-    mock_db.return_value = [{'id': 'test-uuid-123'}]
+    mock_db.return_value = {'id': 'test-uuid-123'}
 
     api_key = 'ek_test_api_key_12345678901234'
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -134,7 +141,7 @@ async def test_submit_rating_success(mock_db, mock_verify_auth):
 @pytest.mark.asyncio
 async def test_submit_rating_calculates_overall(mock_db, mock_verify_auth):
     """Test overall score calculation is correct."""
-    mock_db.return_value = [{'id': 'test-uuid-456'}]
+    mock_db.return_value = {'id': 'test-uuid-456'}
 
     # accuracy=5, stability=5, efficiency=4, usability=4
     # overall = 5*0.40 + 5*0.30 + 4*0.20 + 4*0.10 = 2.0 + 1.5 + 0.8 + 0.4 = 4.7
@@ -190,14 +197,13 @@ async def test_query_rating_without_auth():
     This test verifies the HTTPException handler directly.
     """
     mock_request = MagicMock()
-    exc = HTTPException(status_code=401, detail={"error": {"code": "UNAUTHORIZED", "message": "Invalid authorization header"}})
-
+    exc = HTTPException(status_code=401, detail="Invalid API key")
     response = await http_exception_handler(mock_request, exc)
-
     assert response.status_code == 401
     import json
     body = json.loads(response.body)
     assert body['error']['code'] == 'UNAUTHORIZED'
+    assert isinstance(body['error']['message'], str)
 
 
 @pytest.mark.asyncio
@@ -274,21 +280,21 @@ async def test_http_exception_handler():
     mock_request = MagicMock()
 
     # Test 401
-    exc_401 = HTTPException(status_code=401, detail={"error": {"code": "UNAUTHORIZED", "message": "Invalid authorization header"}})
+    exc_401 = HTTPException(status_code=401, detail="Invalid API key")
     response = await http_exception_handler(mock_request, exc_401)
-
     assert response.status_code == 401
     import json
     body = json.loads(response.body)
     assert body['error']['code'] == 'UNAUTHORIZED'
+    assert isinstance(body['error']['message'], str)
 
     # Test 404
-    exc_404 = HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": "Not found"}})
+    exc_404 = HTTPException(status_code=404, detail="No ratings found for tool: unknown")
     response = await http_exception_handler(mock_request, exc_404)
-
     assert response.status_code == 404
     body = json.loads(response.body)
-    assert body['error']['code'] == 'ERROR'
+    assert body['error']['code'] == 'NOT_FOUND'
+    assert body['error']['message'] == "No ratings found for tool: unknown"
 
 
 @pytest.mark.asyncio

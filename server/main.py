@@ -1,8 +1,8 @@
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from auth import generate_api_key, extract_key_from_header
-from models import AgentRegisterResponse, RatingSubmit, RatingResponse, ToolStatsResponse
+from auth import generate_api_key, hash_api_key, verify_api_key, extract_key_from_header
+from models import AgentRegisterRequest, AgentRegisterResponse, RatingSubmit, RatingResponse, ToolStatsResponse
 from db import execute_sql
 
 app = FastAPI()
@@ -16,9 +16,11 @@ async def validation_exception_handler(request, exc):
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
+    code_map = {401: "UNAUTHORIZED", 404: "NOT_FOUND"}
+    code = code_map.get(exc.status_code, "ERROR")
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": {"code": "UNAUTHORIZED" if exc.status_code == 401 else "ERROR", "message": exc.detail}}
+        content={"error": {"code": code, "message": str(exc.detail)}}
     )
 
 @app.exception_handler(Exception)
@@ -29,24 +31,36 @@ async def general_exception_handler(request, exc):
     )
 
 @app.post("/api/v1/agents/register", response_model=AgentRegisterResponse)
-def register_agent():
-    """Register a new agent and return API key. No DB operation for MVP."""
+def register_agent(req: AgentRegisterRequest):
     api_key = generate_api_key()
-    return AgentRegisterResponse(api_key=api_key)
+    key_hash = hash_api_key(api_key)
+    execute_sql(
+        "INSERT INTO agents (agent_type, api_key_hash) VALUES (%s, %s) RETURNING id",
+        (req.agent_type, key_hash),
+        fetch_one=True
+    )
+    return AgentRegisterResponse(api_key=api_key, agent_type=req.agent_type)
 
 async def verify_auth(authorization: str = Header(...)):
-    """Verify API key from Authorization header."""
     api_key = extract_key_from_header(authorization)
     if not api_key:
-        raise HTTPException(status_code=401, detail={"error": {"code": "UNAUTHORIZED", "message": "Invalid authorization header"}})
-    return api_key
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+
+    agents = execute_sql(
+        "SELECT api_key_hash, agent_type FROM agents",
+        fetch_all=True
+    )
+
+    for agent in agents:
+        if verify_api_key(api_key, agent['api_key_hash']):
+            return agent['api_key_hash'], agent['agent_type']
+
+    raise HTTPException(status_code=401, detail="Invalid API key")
 
 @app.post("/api/v1/ratings", response_model=RatingResponse)
 async def submit_rating(rating: RatingSubmit, authorization: str = Header(...)):
-    """Submit a rating for a tool."""
-    api_key = await verify_auth(authorization)
+    api_key_hash, _ = await verify_auth(authorization)
 
-    # Calculate overall score
     overall = (
         rating.accuracy * 0.40 +
         rating.stability * 0.30 +
@@ -59,7 +73,7 @@ async def submit_rating(rating: RatingSubmit, authorization: str = Header(...)):
         """INSERT INTO ratings (tool_name, api_key_hash, accuracy, efficiency, usability, stability, overall, comment)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
            RETURNING id""",
-        (rating.tool_name, api_key, rating.accuracy, rating.efficiency, rating.usability, rating.stability, overall, rating.comment),
+        (rating.tool_name, api_key_hash, rating.accuracy, rating.efficiency, rating.usability, rating.stability, overall, rating.comment),
         fetch_one=True
     )
 
@@ -68,8 +82,7 @@ async def submit_rating(rating: RatingSubmit, authorization: str = Header(...)):
 
 @app.get("/api/v1/ratings/{tool_name}", response_model=ToolStatsResponse)
 async def get_rating(tool_name: str, authorization: str = Header(...)):
-    """Get rating stats for a tool."""
-    api_key = await verify_auth(authorization)
+    await verify_auth(authorization)
 
     result = execute_sql(
         """SELECT tool_name, total_ratings, avg_accuracy, avg_efficiency,
@@ -80,7 +93,7 @@ async def get_rating(tool_name: str, authorization: str = Header(...)):
     )
 
     if not result:
-        raise HTTPException(status_code=404, detail={"error": {"code": "NOT_FOUND", "message": f"No ratings found for tool: {tool_name}"}})
+        raise HTTPException(status_code=404, detail=f"No ratings found for tool: {tool_name}")
 
     return ToolStatsResponse(
         tool_name=result['tool_name'],
