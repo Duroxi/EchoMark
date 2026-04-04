@@ -4,7 +4,7 @@ sys.path.insert(0, 'server')
 import pytest
 from pydantic import ValidationError
 from models import (
-    RatingSubmit, RatingResponse, AgentRegisterResponse,
+    RatingSubmit, RatingResponse, AgentRegisterResponse, AgentRegisterRequest,
     ToolStatsResponse, ErrorDetail, ErrorResponse
 )
 
@@ -75,12 +75,33 @@ class TestRatingSubmit:
             )
 
 
+class TestAgentRegisterRequest:
+    """AgentRegisterRequest 验证测试"""
+
+    def test_valid_request(self):
+        req = AgentRegisterRequest(agent_type="claude-code")
+        assert req.agent_type == "claude-code"
+
+    def test_agent_type_required(self):
+        with pytest.raises(ValidationError):
+            AgentRegisterRequest()
+
+    def test_agent_type_min_length(self):
+        with pytest.raises(ValidationError):
+            AgentRegisterRequest(agent_type="")
+
+    def test_agent_type_max_length(self):
+        with pytest.raises(ValidationError):
+            AgentRegisterRequest(agent_type="x" * 256)
+
+
 class TestAgentRegisterResponse:
     """AgentRegisterResponse 测试"""
 
     def test_valid_response(self):
-        resp = AgentRegisterResponse(api_key="ek_test123")
+        resp = AgentRegisterResponse(api_key="ek_test123", agent_type="claude-code")
         assert resp.api_key == "ek_test123"
+        assert resp.agent_type == "claude-code"
 
 
 class TestRatingResponse:

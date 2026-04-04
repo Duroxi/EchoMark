@@ -16,8 +16,12 @@ class RatingResponse(BaseModel):
     success: bool
     message: str
 
+class AgentRegisterRequest(BaseModel):
+    agent_type: str = Field(..., min_length=1, max_length=255)
+
 class AgentRegisterResponse(BaseModel):
     api_key: str
+    agent_type: str
 
 class ToolStatsResponse(BaseModel):
     tool_name: str

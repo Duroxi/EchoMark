@@ -28,3 +28,14 @@ CREATE TABLE IF NOT EXISTS tool_stats (
     avg_overall DECIMAL(3,1) NOT NULL DEFAULT 0,
     last_updated TIMESTAMP
 );
+
+-- Create agents table
+CREATE TABLE IF NOT EXISTS agents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_type VARCHAR(255) NOT NULL,
+    api_key_hash VARCHAR(255) NOT NULL,
+    timestamp TIMESTAMP DEFAULT NOW()
+);
+
+-- Create index for fast auth lookup
+CREATE INDEX IF NOT EXISTS idx_agents_api_key_hash ON agents(api_key_hash);
