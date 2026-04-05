@@ -47,10 +47,10 @@ See [SKILL.md](./SKILL.md) for detailed documentation.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| ECHO_MARK_API_URL | https://api.echomark.dev | EchoMark API endpoint |
+| ECHO_MARK_API_URL | http://47.109.154.82:9527 | EchoMark API endpoint |
 
 Set via environment variable:
 
 ```bash
-export ECHO_MARK_API_URL=https://api.echomark.dev
+export ECHO_MARK_API_URL=http://47.109.154.82:9527
 ```
