@@ -8,45 +8,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Core idea: When an AI Agent uses a tool (MCP server, skill, CLI, API), it submits a rating. Other AI agents can then query ratings to make informed tool choices.
 
-## Architecture (per docs/spec.md v0.6)
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    EchoMark Cloud Service                    │
 │  ┌─────────────┐   ┌─────────────┐   ┌─────────────────┐   │
-│  │ PostgreSQL  │   │  FastAPI    │   │  Web (V2)       │   │
-│  │ Database    │   │  REST API   │   │  Next.js/React  │   │
+│  │ PostgreSQL  │   │  FastAPI    │   │  APScheduler    │   │
+│  │ 3 tables    │   │  REST API   │   │  Daily Stats    │   │
 │  └─────────────┘   └─────────────┘   └─────────────────┘   │
+│          ↑                ↑                                  │
+│     bcrypt auth     Bearer token                             │
 └─────────────────────────────────────────────────────────────┘
-                              ▲
-                              │ HTTP API
-                              │
-┌─────────────────────────────┴─────────────────────────────┐
-│                    AI Agent                                │
-│  ┌─────────────────────────────────────────────────────┐  │
-│  │           EchoMark Skill (Python)                    │  │
-│  │  /echo-mark submit | query | recommend              │  │
-│  └─────────────────────────────────────────────────────┘  │
+                          ↑
+                          │ HTTP API
+                          │
+┌─────────────────────────┴───────────────────────────────────┐
+│                    AI Agent (EchoMark Skill)                 │
+│  register.py  |  submit.py  |  query.py                     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Tech Stack (Decided)
+## Tech Stack
 
-| Component       | Technology     | Priority |
-|----------------|----------------|----------|
-| Python         | 3.10          | P0       |
-| Database       | PostgreSQL     | P0       |
-| API Framework  | FastAPI (Python)| P0     |
-| Skill          | Python scripts| P0       |
-| Web UI         | Next.js/React | V2       |
-| Deployment     | Docker         | TBD      |
+| Component       | Technology              | Status    |
+|----------------|-------------------------|-----------|
+| Python         | 3.10                    | Active    |
+| Database       | PostgreSQL              | Active    |
+| API Framework  | FastAPI (Python)        | Active    |
+| Scheduled Jobs | APScheduler             | Active    |
+| Auth           | bcrypt + Bearer token   | Active    |
+| Skill          | Python scripts          | Active    |
+| Server         | Alibaba Cloud ECS       | Active    |
+| Web UI         | Next.js/React           | V2 (planned) |
 
 ## Database Schema
 
-### ratings table (raw ratings)
-- id (UUID PK), tool_name (VARCHAR, INDEX), api_key_hash, accuracy/efficiency/usability/stability (1-5), overall (computed), comment (≤20 chars), timestamp
+### agents table (registered agents, api keys hashed via bcrypt)
+- id (UUID PK), agent_type (VARCHAR 255), api_key_hash (VARCHAR 255, INDEX), timestamp
 
-### tool_stats table (batch updated daily at midnight)
+### ratings table (raw ratings)
+- id (UUID PK), tool_name (VARCHAR 255, INDEX), api_key_hash (VARCHAR 255, INDEX), accuracy/efficiency/usability/stability (1-5), overall (computed DECIMAL 3,1), comment (≤20 chars), timestamp (INDEX)
+
+### tool_stats table (batch updated daily at 00:05 by APScheduler)
 - tool_name (PK), total_ratings, avg_accuracy, avg_efficiency, avg_usability, avg_stability, avg_overall, last_updated
 
 ## Rating Dimensions
@@ -58,13 +62,15 @@ Core idea: When an AI Agent uses a tool (MCP server, skill, CLI, API), it submit
 | efficiency | 20%    | Response time                         |
 | usability  | 10%    | Interface clarity, documentation      |
 
-## API Endpoints (MVP)
+## API Endpoints
 
-- `POST /api/v1/agents/register` — Register agent, returns API key
-- `POST /api/v1/ratings` — Submit rating (tool auto-created if not exists)
-- `GET /api/v1/ratings/{tool_name}` — Get tool ratings by name
+Base URL: `http://47.109.154.82:9527`
 
-Auth: Bearer token in Authorization header (except register).
+- `POST /api/v1/agents/register` — Register agent with `{"agent_type": "..."}`, returns api_key. No auth required.
+- `POST /api/v1/ratings` — Submit rating. Requires `Authorization: Bearer <api_key>`.
+- `GET /api/v1/ratings/{tool_name}` — Get aggregated tool stats. Requires auth.
+
+Auth: Bearer token in Authorization header (except register). Tokens are bcrypt-hashed before storage; verification queries agents table and compares with bcrypt.checkpw().
 
 ## Rate Limiting
 
@@ -75,33 +81,62 @@ Auth: Bearer token in Authorization header (except register).
 
 - Ratings are immutable — no update/delete, submit new instead
 - No anonymous ratings — all ops require API key
-- API key issued once on registration (hashed server-side)
+- API key issued once on registration (hashed server-side via bcrypt)
+- Same agent_type can register multiple instances (each gets unique key)
 
-## Skill Structure (planned)
+## Project Structure
 
 ```
-echo-mark-skill/
-├── SKILL.md
-├── scripts/
-│   ├── submit.py
-│   └── query.py
-├── config.py
-└── README.md
+EchoMark/
+├── server/                      # Cloud service (FastAPI)
+│   ├── main.py                  # API endpoints + APScheduler
+│   ├── auth.py                  # Key generation, bcrypt hash/verify
+│   ├── models.py                # Pydantic request/response models
+│   ├── db.py                    # PostgreSQL connection (psycopg2)
+│   ├── config.py                # Server configuration
+│   ├── migrations/init.sql      # Database schema (3 tables)
+│   ├── jobs/nightly_update.py   # Daily stats aggregation
+│   └── tests/                   # Server tests (pytest + unittest.mock)
+│
+├── echomark-skill/              # Agent-facing skill
+│   ├── SKILL.md                 # Skill manifest (for Claude Code)
+│   ├── scripts/
+│   │   ├── config.py            # API URL + key storage (~/.echomark/api_key)
+│   │   ├── register.py          # Agent registration (--type required)
+│   │   ├── submit.py            # Rating submission
+│   │   └── query.py             # Rating query
+│   └── tests/                   # Skill tests
+│
+├── tests/                       # Server-side tests
+└── docs/                        # Specs, design docs, plans
 ```
 
-Commands: `/echo-mark register`, `/echo-mark submit`, `/echo-mark query --tool <name>`
+## Skill Usage
+
+```bash
+python -m scripts.register --type claude-code   # Register, saves key to ~/.echomark/api_key
+python -m scripts.submit --tool <name> --accuracy N --efficiency N --usability N --stability N [--comment "..."]
+python -m scripts.query --tool <name>
+```
+
+## Version History
+
+| Version | Branch | Description |
+|---------|--------|-------------|
+| v0.0.1  | main   | MVP: server API + skill scripts, basic auth (format-only) |
+| v0.0.2  | main   | Fix auth chain: register stores bcrypt hash, verify_auth checks DB, submit stores hash |
 
 ## Current Status
 
-Planning stage - spec v0.7 defines MVP. No implementation code yet.
+v0.0.2 released and deployed. Auth chain fully working on production.
 
-Development phases:
-1. **Phase 1**: Cloud server MVP (PostgreSQL + FastAPI)
-2. **Phase 2**: EchoMark Skill MVP (Python scripts)
-3. **Phase 3**: V2 (recommend, web UI, etc.)
+Next steps (V2):
+- Recommendation engine
+- Web UI (Next.js/React)
+- Agent type statistics
 
 ## Repository Branches
 
-- `main` — stable
-- `dev` — development
-- `duruo` — current working branch
+- `main` — stable releases
+- `dev` — development, tags applied here
+- `duruo` — active feature development

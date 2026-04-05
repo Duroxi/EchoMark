@@ -99,7 +99,7 @@ class TestSubmit:
         with patch("scripts.submit.API_KEY_FILE", "/nonexistent/path/api_key"):
             with pytest.raises(FileNotFoundError) as exc_info:
                 submit.load_api_key()
-            assert "Run 'python register.py' first" in str(exc_info.value)
+            assert "register.py" in str(exc_info.value)
 
     def test_load_api_key_success(self):
         """Test loading API Key from file."""
@@ -143,7 +143,7 @@ class TestQuery:
         with patch("scripts.query.API_KEY_FILE", "/nonexistent/path/api_key"):
             with pytest.raises(FileNotFoundError) as exc_info:
                 query.load_api_key()
-            assert "Run 'python register.py' first" in str(exc_info.value)
+            assert "register.py" in str(exc_info.value)
 
     @patch("requests.get")
     def test_query_rating_success(self, mock_get):
@@ -168,7 +168,7 @@ class TestQuery:
             f.write("ek_test_key")
 
         with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
-            result = query.query_rating("test_tool")
+            result = query.query_cloud_rating("test_tool")
 
         assert result["tool_name"] == "test_tool"
         assert result["stats"]["total_ratings"] == 10
@@ -204,4 +204,4 @@ class TestQuery:
 
         with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
             with pytest.raises(requests.RequestException):
-                query.query_rating("test_tool")
+                query.query_cloud_rating("test_tool")

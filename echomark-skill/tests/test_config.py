@@ -17,7 +17,7 @@ API_KEY_FILE = skill_config.API_KEY_FILE
 
 def test_api_url_default():
     """测试默认 API URL"""
-    assert ECHO_MARK_API_URL == "http://192.168.1.99:9527"
+    assert ECHO_MARK_API_URL == "http://47.109.154.82:9527"
 
 
 def test_api_timeout():

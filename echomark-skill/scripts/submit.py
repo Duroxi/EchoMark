@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import requests
 from config import ECHO_MARK_API_URL, API_TIMEOUT, API_KEY_FILE
+from local_db import save_rating
 
 
 def load_api_key():
@@ -22,7 +23,7 @@ def load_api_key():
 
 
 def submit_rating(tool_name, accuracy, efficiency, usability, stability, comment=""):
-    """Submit a tool rating."""
+    """Submit a tool rating to cloud server."""
     api_key = load_api_key()
     url = f"{ECHO_MARK_API_URL}/api/v1/ratings"
 
@@ -52,9 +53,31 @@ def main():
     parser.add_argument("--usability", type=int, required=True, choices=[1, 2, 3, 4, 5], help="Usability (1-5)")
     parser.add_argument("--stability", type=int, required=True, choices=[1, 2, 3, 4, 5], help="Stability (1-5)")
     parser.add_argument("--comment", default="", help="Comment (max 20 chars)")
+    parser.add_argument("--local-only", action="store_true", help="Save locally only, skip cloud submission")
 
     args = parser.parse_args()
 
+    overall = round(
+        args.accuracy * 0.40 + args.stability * 0.30 +
+        args.efficiency * 0.20 + args.usability * 0.10, 1
+    )
+
+    # Always save locally
+    save_rating(
+        tool_name=args.tool,
+        accuracy=args.accuracy,
+        efficiency=args.efficiency,
+        usability=args.usability,
+        stability=args.stability,
+        overall=overall,
+        comment=args.comment,
+    )
+
+    if args.local_only:
+        print(f"Rating saved locally! Tool: {args.tool}, Overall: {overall}")
+        return
+
+    # Submit to cloud
     try:
         result = submit_rating(
             tool_name=args.tool,
@@ -66,11 +89,9 @@ def main():
         )
         print(f"Rating submitted! ID: {result['id']}")
     except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+        print(f"Saved locally but cloud submission skipped: {e}", file=sys.stderr)
     except requests.RequestException as e:
-        print(f"Failed to submit rating: {e}", file=sys.stderr)
-        sys.exit(1)
+        print(f"Saved locally but cloud submission failed: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":

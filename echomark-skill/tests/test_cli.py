@@ -11,18 +11,28 @@ import pytest
 config_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'config.py')
 spec = importlib.util.spec_from_file_location("skill_config", config_path)
 skill_config = importlib.util.module_from_spec(spec)
+skill_config_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(skill_config)
 
 # Create mock config directory and file path
 mock_config_dir = tempfile.mkdtemp()
 mock_api_key_file = os.path.join(mock_config_dir, "api_key")
+mock_db_file = os.path.join(mock_config_dir, "local_ratings.db")
 
-# Setup path and import scripts
-scripts_path = os.path.join(os.path.dirname(__file__), '..')
-sys.path.insert(0, scripts_path)
-sys.modules['config'] = skill_config
+# Patch config before importing scripts
+with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
+    with patch.object(skill_config, 'LOCAL_DB_FILE', mock_db_file):
+        with patch.object(skill_config, 'CONFIG_DIR', mock_config_dir):
+            scripts_path = os.path.join(os.path.dirname(__file__), '..')
+            sys.path.insert(0, scripts_path)
+            sys.modules['config'] = skill_config
 
-from scripts import register, submit, query
+            # Clear cached modules
+            for mod in ['scripts', 'scripts.register', 'scripts.submit',
+                        'scripts.query', 'scripts.local_db']:
+                sys.modules.pop(mod, None)
+
+            from scripts import register, submit, query
 
 
 class TestRegisterCLI:
@@ -92,7 +102,7 @@ class TestSubmitCLI:
     def test_submit_main_success(self, mock_post):
         """Test submit main success."""
         mock_response = MagicMock()
-        mock_response.json.return_value = {"id": "uuid-123", "success": True}
+        mock_response.json.return_value = {"id": "uuid-123", "success": True, "message": "Rating submitted"}
         mock_response.raise_for_status = MagicMock()
         mock_post.return_value = mock_response
 
@@ -100,31 +110,51 @@ class TestSubmitCLI:
             f.write("ek_test_key")
 
         with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
-            with patch.object(sys, 'argv', [
-                'submit', '--tool', 'tavily',
-                '--accuracy', '5', '--efficiency', '4',
-                '--usability', '4', '--stability', '5',
-                '--comment', '好'
-            ]):
-                try:
-                    submit.main()
-                except SystemExit:
-                    pass
+            with patch.object(skill_config, 'LOCAL_DB_FILE', mock_db_file):
+                with patch.object(sys, 'argv', [
+                    'submit', '--tool', 'tavily',
+                    '--accuracy', '5', '--efficiency', '4',
+                    '--usability', '4', '--stability', '5',
+                    '--comment', 'great'
+                ]):
+                    try:
+                        submit.main()
+                    except SystemExit:
+                        pass
 
         mock_post.assert_called_once()
+
+    def test_submit_local_only(self):
+        """Test submit with --local-only flag skips cloud."""
+        with open(mock_api_key_file, "w") as f:
+            f.write("ek_test_key")
+
+        with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
+            with patch.object(skill_config, 'LOCAL_DB_FILE', mock_db_file):
+                with patch.object(sys, 'argv', [
+                    'submit', '--tool', 'test_local',
+                    '--accuracy', '4', '--efficiency', '3',
+                    '--usability', '4', '--stability', '5',
+                    '--local-only'
+                ]):
+                    try:
+                        submit.main()
+                    except SystemExit:
+                        pass
 
     def test_submit_file_not_found(self):
         """Test submit API Key file not found."""
         with patch.object(skill_config, 'API_KEY_FILE', "/nonexistent/path/api_key"):
-            with patch.object(sys, 'argv', [
-                'submit', '--tool', 'tavily',
-                '--accuracy', '5', '--efficiency', '4',
-                '--usability', '4', '--stability', '5'
-            ]):
-                try:
-                    submit.main()
-                except SystemExit as e:
-                    assert e.code == 1
+            with patch.object(skill_config, 'LOCAL_DB_FILE', mock_db_file):
+                with patch.object(sys, 'argv', [
+                    'submit', '--tool', 'tavily',
+                    '--accuracy', '5', '--efficiency', '4',
+                    '--usability', '4', '--stability', '5'
+                ]):
+                    try:
+                        submit.main()
+                    except SystemExit as e:
+                        assert e.code == 1
 
 
 class TestQueryCLI:
@@ -139,8 +169,8 @@ class TestQueryCLI:
                 pass
 
     @patch("requests.get")
-    def test_query_main_success(self, mock_get):
-        """Test query main success."""
+    def test_query_cloud_success(self, mock_get):
+        """Test query with --cloud flag."""
         mock_response = MagicMock()
         mock_response.json.return_value = {
             "tool_name": "tavily",
@@ -161,13 +191,22 @@ class TestQueryCLI:
             f.write("ek_test_key")
 
         with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
-            with patch.object(sys, 'argv', ['query', '--tool', 'tavily']):
+            with patch.object(sys, 'argv', ['query', '--tool', 'tavily', '--cloud']):
                 try:
                     query.main()
                 except SystemExit:
                     pass
 
         mock_get.assert_called_once()
+
+    def test_query_local_no_data(self):
+        """Test query default (local) with no data."""
+        with patch.object(skill_config, 'LOCAL_DB_FILE', mock_db_file):
+            with patch.object(sys, 'argv', ['query', '--tool', 'nonexistent_tool']):
+                try:
+                    query.main()
+                except SystemExit:
+                    pass
 
     @patch("requests.get")
     def test_query_network_error(self, mock_get):
@@ -179,7 +218,7 @@ class TestQueryCLI:
             f.write("ek_test_key")
 
         with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
-            with patch.object(sys, 'argv', ['query', '--tool', 'tavily']):
+            with patch.object(sys, 'argv', ['query', '--tool', 'tavily', '--cloud']):
                 try:
                     query.main()
                 except SystemExit as e:
