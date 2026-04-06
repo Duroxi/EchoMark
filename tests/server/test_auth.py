@@ -1,5 +1,6 @@
+import os
 import sys
-sys.path.insert(0, 'server')
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'server'))
 
 from auth import generate_api_key, hash_api_key, verify_api_key, extract_key_from_header
 

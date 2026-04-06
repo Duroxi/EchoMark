@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 # Load skill config directly from scripts directory
-config_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'config.py')
+config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'echomark-skill', 'scripts', 'config.py')
 spec = importlib.util.spec_from_file_location("skill_config", config_path)
 skill_config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(skill_config)
@@ -22,7 +22,7 @@ with patch.dict(os.environ, {"ECHO_MARK_API_URL": "http://test.local"}):
         with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
             # Now import the scripts with patched config
             import sys
-            scripts_path = os.path.join(os.path.dirname(__file__), '..')
+            scripts_path = os.path.join(os.path.dirname(__file__), '..', '..', 'echomark-skill')
             sys.path.insert(0, scripts_path)
 
             # Clear any cached imports

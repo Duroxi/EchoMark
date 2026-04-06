@@ -1,6 +1,7 @@
 """Tests for server config."""
+import os
 import sys
-sys.path.insert(0, 'server')
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'server'))
 from config import DATABASE_URL, LAST_UPDATE_FILE, API_KEY_LENGTH, API_KEY_PREFIX
 
 def test_database_url_default():

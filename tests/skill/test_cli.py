@@ -8,7 +8,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 # Load skill config directly to avoid import conflicts
-config_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'config.py')
+config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'echomark-skill', 'scripts', 'config.py')
 spec = importlib.util.spec_from_file_location("skill_config", config_path)
 skill_config = importlib.util.module_from_spec(spec)
 skill_config_mod = importlib.util.module_from_spec(spec)
@@ -23,7 +23,7 @@ mock_db_file = os.path.join(mock_config_dir, "local_ratings.db")
 with patch.object(skill_config, 'API_KEY_FILE', mock_api_key_file):
     with patch.object(skill_config, 'LOCAL_DB_FILE', mock_db_file):
         with patch.object(skill_config, 'CONFIG_DIR', mock_config_dir):
-            scripts_path = os.path.join(os.path.dirname(__file__), '..')
+            scripts_path = os.path.join(os.path.dirname(__file__), '..', '..', 'echomark-skill')
             sys.path.insert(0, scripts_path)
             sys.modules['config'] = skill_config
 

@@ -4,7 +4,7 @@ import os
 import sys
 
 # Load config directly from the scripts directory
-config_path = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'config.py')
+config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'echomark-skill', 'scripts', 'config.py')
 spec = importlib.util.spec_from_file_location("skill_config", config_path)
 skill_config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(skill_config)

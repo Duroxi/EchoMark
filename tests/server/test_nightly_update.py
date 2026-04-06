@@ -1,8 +1,8 @@
 """Tests for nightly_update job."""
-import sys
-sys.path.insert(0, 'server')
-
 import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'server'))
+
 import tempfile
 from datetime import datetime
 from unittest.mock import patch, MagicMock
