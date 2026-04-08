@@ -1,204 +1,335 @@
-# EchoMark 服务端更新指南
+# EchoMark v0.0.3 迁移指南
 
-> 更新前请先停止服务，更新完成后重启。
+> 本文档指导从 v0.0.2 升级到 v0.0.3。执行迁移的 Agent 请严格按照步骤操作，不要跳过任何步骤。
 
-## 第一步：拉取最新代码
+---
 
-```bash
-cd /path/to/EchoMark
-git pull origin dev
-```
+## 一、本次变更内容
 
-## 第二步：重置数据库（必须）
+### 核心改动：认证性能优化
 
-v0.0.2 重写了认证逻辑，旧数据中的 API Key 为明文存储且无法迁移，需要清空数据库并重建。
+v0.0.2 的 `verify_auth` 函数在每次 API 请求认证时，会从数据库加载**所有 Agent 记录**，然后在 Python 中逐一用 bcrypt 比对。随着 Agent 数量增长，认证延迟会线性增加（每多 100 个 Agent 约增加 10 秒）。
 
-### 2.1 进入 PostgreSQL 命令行
+v0.0.3 的解决方案：在 `agents` 表中新增 `key_prefix` 字段，存储 API Key 的前 10 位明文。认证时先用 `key_prefix` 做数据库索引查询（毫秒级），只对命中的 0~1 条记录做 bcrypt 验证，将认证复杂度从 O(N) 降到 O(1)。
 
-```bash
-sudo -u postgres psql
-```
+### 变更的文件
 
-或者如果你的 PostgreSQL 用户有密码：
+| 文件 | 变更说明 |
+|------|---------|
+| `server/config.py` | 新增 `KEY_PREFIX_LEN = 10` 常量 |
+| `server/auth.py` | 新增 `extract_key_prefix()` 函数，从 API Key 提取前 10 位作为前缀 |
+| `server/main.py` | 注册端点：INSERT 时多存一个 `key_prefix` 字段 |
+| `server/main.py` | `verify_auth`：从 `SELECT ... FROM agents`（全表扫描）改为 `SELECT ... FROM agents WHERE key_prefix = %s`（索引查询） |
+| `server/migrations/init.sql` | agents 表定义新增 `key_prefix VARCHAR(10) NOT NULL` 字段和 `idx_agents_key_prefix` 索引 |
+| `server/migrations/v0.0.3_add_key_prefix.sql` | **新增文件**：生产环境迁移 SQL |
+| `tests/server/test_auth.py` | 新增 `test_extract_key_prefix` 测试 |
+| `tests/server/test_api.py` | 新增 3 个测试验证 key_prefix 逻辑 |
 
-```bash
-psql -U postgres -d echomark
-```
+### 未变更的文件
 
-### 2.2 切换到 echomark 数据库（如果上一步没指定 -d）
+- `server/db.py` — 无变更
+- `server/models.py` — 无变更
+- `server/jobs/nightly_update.py` — 无变更
+- `echomark-skill/` 目录 — 全部无变更，Skill 端不需要任何改动
+- API 接口契约 — 无变更（请求/响应格式完全不变）
 
-```sql
-\c echomark
-```
+### 数据库变更
 
-### 2.3 删除旧表
+- `ratings` 表 — **不动**
+- `tool_stats` 表 — **不动**
+- `agents` 表 — 新增 `key_prefix` 字段 + 索引，清空旧数据
 
-```sql
-DROP TABLE IF EXISTS ratings;
-DROP TABLE IF EXISTS tool_stats;
-DROP TABLE IF EXISTS agents;
-```
+### 对用户的影响
 
-预期输出：
-```
-DROP TABLE
-DROP TABLE
-DROP TABLE
-```
+- 所有已注册的 Agent 的 API Key 将**失效**，需要重新注册
+- 旧评分数据**不受影响**，保留在 ratings 表中
+- Skill 端代码**不需要任何改动**
 
-### 2.4 重新建表
+---
 
-逐行复制粘贴以下 SQL，在 psql 命令行中执行：
+## 二、迁移前检查
 
-```sql
-CREATE TABLE IF NOT EXISTS ratings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tool_name VARCHAR(255) NOT NULL,
-    api_key_hash VARCHAR(255) NOT NULL,
-    accuracy INTEGER NOT NULL CHECK (accuracy >= 1 AND accuracy <= 5),
-    efficiency INTEGER NOT NULL CHECK (efficiency >= 1 AND efficiency <= 5),
-    usability INTEGER NOT NULL CHECK (usability >= 1 AND usability <= 5),
-    stability INTEGER NOT NULL CHECK (stability >= 1 AND stability <= 5),
-    overall DECIMAL(3,1) NOT NULL,
-    comment VARCHAR(20),
-    timestamp TIMESTAMP DEFAULT NOW()
-);
+在执行迁移之前，先确认以下信息：
 
-CREATE INDEX IF NOT EXISTS idx_ratings_tool_name ON ratings(tool_name);
-CREATE INDEX IF NOT EXISTS idx_ratings_api_key ON ratings(api_key_hash);
-CREATE INDEX IF NOT EXISTS idx_ratings_timestamp ON ratings(timestamp);
-
-CREATE TABLE IF NOT EXISTS tool_stats (
-    tool_name VARCHAR(255) PRIMARY KEY,
-    total_ratings INTEGER NOT NULL DEFAULT 0,
-    avg_accuracy DECIMAL(3,1) NOT NULL DEFAULT 0,
-    avg_efficiency DECIMAL(3,1) NOT NULL DEFAULT 0,
-    avg_usability DECIMAL(3,1) NOT NULL DEFAULT 0,
-    avg_stability DECIMAL(3,1) NOT NULL DEFAULT 0,
-    avg_overall DECIMAL(3,1) NOT NULL DEFAULT 0,
-    last_updated TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS agents (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_type VARCHAR(255) NOT NULL,
-    api_key_hash VARCHAR(255) NOT NULL,
-    timestamp TIMESTAMP DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_agents_api_key_hash ON agents(api_key_hash);
-```
-
-预期输出：
-```
-CREATE TABLE
-CREATE INDEX
-CREATE TABLE
-CREATE TABLE
-CREATE TABLE
-CREATE INDEX
-```
-
-### 2.5 验证三张表都已创建
-
-```sql
-\dt
-```
-
-预期输出：
-```
-             List of relations
- Schema |    Name    | Type  |  Owner
---------+------------+-------+----------
- public | agents     | table | postgres
- public | ratings    | table | postgres
- public | tool_stats | table | postgres
-```
-
-### 2.6 退出 PostgreSQL
-
-```sql
-\q
-```
-
-## 第三步：重启服务
-
-先找到并停止旧进程：
+### 步骤 1：确认当前服务状态
 
 ```bash
-# 查找 uvicorn 进程
+# 确认服务是否在运行
+curl -s http://localhost:9527/docs | head -5
+
+# 如果服务在运行，会返回 HTML 内容
+# 如果服务未运行，会返回连接错误
+```
+
+### 步骤 2：确认数据库连接信息
+
+```bash
+# 查看当前服务的环境变量，找到 DATABASE_URL
+# 方法取决于服务的部署方式（Docker / systemd / 直接运行）
+# 以下提供几种常见方式，选择适用的：
+
+# 如果是 Docker 部署：
+docker inspect <container_name> | grep -i database
+
+# 如果是 systemd 部署：
+cat /etc/systemd/system/echomark.service | grep -i database
+
+# 如果是直接运行：
 ps aux | grep uvicorn
-
-# 停止进程（替换 <PID> 为实际进程号）
-kill <PID>
+# 找到进程的环境变量
+cat /proc/<pid>/environ | tr '\0' '\n' | grep DATABASE_URL
 ```
 
-重新启动：
+记下 `DATABASE_URL` 的值，后续步骤需要用到。
+
+### 步骤 3：确认数据库当前状态
 
 ```bash
+# 用上面获取的 DATABASE_URL 连接数据库
+# 将 <DATABASE_URL> 替换为实际的连接字符串
+
+psql "<DATABASE_URL>" -c "\d agents"
+```
+
+预期输出应包含以下字段（v0.0.2 的 agents 表）：
+
+```
+ id           | UUID
+ agent_type   | character varying(255)
+ api_key_hash | character varying(255)
+ timestamp    | timestamp without time zone
+```
+
+**如果输出中已经包含 `key_prefix` 字段，说明迁移已经执行过，不要重复执行。**
+
+### 步骤 4：备份 agents 表（可选但推荐）
+
+```bash
+# 导出当前 agents 表数据作为备份
+pg_dump "<DATABASE_URL>" -t agents > agents_backup_$(date +%Y%m%d).sql
+```
+
+---
+
+## 三、执行迁移
+
+### 步骤 1：停止服务
+
+停止 EchoMark API 服务，防止迁移期间有新的请求进来。
+
+具体停止方式取决于部署方式，以下提供几种常见方式：
+
+```bash
+# Docker 部署：
+docker stop <container_name>
+
+# systemd 部署：
+systemctl stop echomark
+
+# 直接运行：
+# 找到 uvicorn 进程并 kill
+ps aux | grep uvicorn
+kill <pid>
+```
+
+**确认服务已停止：**
+
+```bash
+curl -s http://localhost:9527/docs
+# 应返回连接错误，说明服务已停止
+```
+
+### 步骤 2：执行数据库迁移
+
+迁移 SQL 文件位于：`server/migrations/v0.0.3_add_key_prefix.sql`
+
+文件内容如下：
+
+```sql
+-- v0.0.3: Add key_prefix column for auth performance optimization
+
+-- 1. Add key_prefix column
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS key_prefix VARCHAR(10) NOT NULL DEFAULT '';
+
+-- 2. Create index on key_prefix
+CREATE INDEX IF NOT EXISTS idx_agents_key_prefix ON agents(key_prefix);
+
+-- 3. Truncate old agent records (cannot backfill key_prefix from bcrypt hashes)
+TRUNCATE TABLE agents;
+```
+
+执行方式：
+
+```bash
+# 方式 A：如果迁移文件已在服务器上
+psql "<DATABASE_URL>" -f /path/to/server/migrations/v0.0.3_add_key_prefix.sql
+
+# 方式 B：如果迁移文件不在服务器上，直接执行 SQL
+psql "<DATABASE_URL>" -c "ALTER TABLE agents ADD COLUMN IF NOT EXISTS key_prefix VARCHAR(10) NOT NULL DEFAULT '';"
+psql "<DATABASE_URL>" -c "CREATE INDEX IF NOT EXISTS idx_agents_key_prefix ON agents(key_prefix);"
+psql "<DATABASE_URL>" -c "TRUNCATE TABLE agents;"
+```
+
+### 步骤 3：验证数据库变更
+
+```bash
+psql "<DATABASE_URL>" -c "\d agents"
+```
+
+预期输出应包含新增的 `key_prefix` 字段：
+
+```
+ id           | UUID
+ agent_type   | character varying(255)
+ api_key_hash | character varying(255)
+ key_prefix   | character varying(10)       ← 新增字段
+ timestamp    | timestamp without time zone
+```
+
+验证索引：
+
+```bash
+psql "<DATABASE_URL>" -c "\di idx_agents_key_prefix"
+```
+
+预期输出应显示 `idx_agents_key_prefix` 索引存在。
+
+验证 agents 表已清空：
+
+```bash
+psql "<DATABASE_URL>" -c "SELECT COUNT(*) FROM agents;"
+```
+
+预期输出：`count = 0`
+
+### 步骤 4：更新服务端代码
+
+将 v0.0.3 的代码部署到服务器，替换 v0.0.2 的代码。
+
+变更的文件列表（只需更新这些文件）：
+
+```
+server/config.py
+server/auth.py
+server/main.py
+server/migrations/init.sql
+```
+
+新增的文件：
+
+```
+server/migrations/v0.0.3_add_key_prefix.sql
+```
+
+具体部署方式取决于项目的部署流程，以下提供几种常见方式：
+
+```bash
+# 如果使用 Git：
+cd /path/to/EchoMark
+git pull origin duruo   # 或对应的分支
+
+# 如果使用 Docker 重新构建：
 cd /path/to/EchoMark/server
-DATABASE_URL="你的数据库连接地址" \
-LAST_UPDATE_FILE="/home/ruoxi/.echomark/last_update" \
-nohup uvicorn main:app --host 0.0.0.0 --port 9527 > echomark.log 2>&1 &
+docker build -t echomark-api:latest .
 ```
 
-## 第四步：验证更新成功
+### 步骤 5：启动服务
 
-### 4.1 测试注册接口（变更点）
-
-之前：无参数调用
 ```bash
-curl -X POST http://localhost:9527/api/v1/agents/register
+# Docker 部署：
+docker start <container_name>
+# 或重新运行：
+docker run -d -p 9527:8000 -e DATABASE_URL="<DATABASE_URL>" echomark-api:latest
+
+# systemd 部署：
+systemctl start echomark
+
+# 直接运行：
+cd /path/to/EchoMark/server
+uvicorn main:app --host 0.0.0.0 --port 9527 &
 ```
 
-现在：需要传 agent_type
+### 步骤 6：验证服务
+
 ```bash
+# 1. 确认服务启动
+curl -s http://localhost:9527/docs | head -5
+# 应返回 HTML 内容
+
+# 2. 测试注册新 Agent
 curl -X POST http://localhost:9527/api/v1/agents/register \
   -H "Content-Type: application/json" \
-  -d '{"agent_type": "test-agent"}'
-```
+  -d '{"agent_type":"test-agent"}'
+# 应返回：{"api_key":"ek_...","agent_type":"test-agent"}
 
-预期返回：
-```json
-{"api_key": "ek_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "agent_type": "test-agent"}
-```
-
-### 4.2 测试认证验证（变更点）
-
-用上一步拿到的 api_key 测试提交评分：
-
-```bash
+# 3. 用新注册的 API Key 测试提交评分
 curl -X POST http://localhost:9527/api/v1/ratings \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <上一步返回的api_key>" \
   -d '{"tool_name":"test-tool","accuracy":5,"efficiency":4,"usability":4,"stability":5}'
+# 应返回：{"id":"...","success":true,"message":"Rating submitted"}
+
+# 4. 验证 key_prefix 已存入数据库
+psql "<DATABASE_URL>" -c "SELECT key_prefix, agent_type FROM agents;"
+# 应返回至少一条记录，key_prefix 不为空，以 "ek_" 开头，长度为 10
+
+# 5. 清理测试数据（可选）
+psql "<DATABASE_URL>" -c "DELETE FROM agents WHERE agent_type = 'test-agent';"
+psql "<DATABASE_URL>" -c "DELETE FROM ratings WHERE tool_name = 'test-tool';"
 ```
 
-预期返回：
-```json
-{"id": "uuid", "success": true, "message": "Rating submitted"}
-```
+---
 
-### 4.3 测试无效 Key 被拒绝
+## 四、迁移后操作
+
+### 通知用户重新注册
+
+迁移完成后，所有旧的 API Key 已失效。需要通知用户：
+
+1. 重新执行注册命令：
+   ```bash
+   cd echomark-skill
+   python -m scripts.register --type <agent_type>
+   ```
+2. 新的 API Key 会自动保存到 `~/.echomark/api_key`
+3. 之后的 submit 和 query 命令无需任何改动
+
+---
+
+## 五、回滚方案
+
+如果迁移后发现问题需要回滚：
+
+### 步骤 1：停止服务
+
+### 步骤 2：回滚代码到 v0.0.2
 
 ```bash
-curl -X POST http://localhost:9527/api/v1/ratings \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer fake_key_that_was_not_registered" \
-  -d '{"tool_name":"test","accuracy":5,"efficiency":4,"usability":4,"stability":5}'
+cd /path/to/EchoMark
+git checkout v0.0.2
 ```
 
-预期返回 401：
-```json
-{"error": {"code": "UNAUTHORIZED", "message": "Invalid API key"}}
+### 步骤 3：回滚数据库
+
+```bash
+psql "<DATABASE_URL>" -c "DROP INDEX IF EXISTS idx_agents_key_prefix;"
+psql "<DATABASE_URL>" -c "ALTER TABLE agents DROP COLUMN IF EXISTS key_prefix;"
 ```
 
-## 变更摘要
+### 步骤 4：恢复 agents 表数据（如果有备份）
 
-| 变更项 | v0.0.1（旧） | v0.0.2（新） |
-|--------|-------------|-------------|
-| 注册接口 | 无参数，不存 DB | 需要 `{"agent_type":"..."}`，存 DB |
-| 认证验证 | 只检查 Bearer 格式 | 查 DB + bcrypt 验证 |
-| 评分提交 | 明文存 Key | 哈希存 Key |
-| 无效 Key | 能通过认证 | 返回 401 |
-| 数据库 | 2 张表 | 3 张表（新增 agents） |
+```bash
+psql "<DATABASE_URL>" < agents_backup_YYYYMMDD.sql
+```
+
+### 步骤 5：启动服务
+
+---
+
+## 六、注意事项
+
+1. **迁移期间服务不可用** — 从停止服务到启动服务之间，API 无法响应请求
+2. **旧 API Key 全部失效** — agents 表被 TRUNCATE，所有用户需重新注册
+3. **ratings 表数据不受影响** — 旧评分数据完整保留
+4. **不要重复执行迁移 SQL** — `IF NOT EXISTS` 保证幂等，但 TRUNCATE 会再次清空 agents 表
+5. **Skill 端不需要任何改动** — API 接口契约未变

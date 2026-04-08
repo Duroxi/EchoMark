@@ -70,6 +70,24 @@ async def test_register_agent_returns_35_chars(mock_db):
 
 
 @pytest.mark.asyncio
+async def test_register_agent_stores_key_prefix(mock_db):
+    """Test registration stores key_prefix in database."""
+    mock_db.return_value = {'id': 'test-uuid'}
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/api/v1/agents/register", json={"agent_type": "claude-code"})
+
+    assert resp.status_code == 200
+    api_key = resp.json()['api_key']
+    call_args = mock_db.call_args
+    assert call_args is not None
+    sql = call_args[0][0]
+    params = call_args[0][1]
+    assert 'key_prefix' in sql
+    assert params[2] == api_key[:10]
+
+
+@pytest.mark.asyncio
 async def test_register_agent_requires_body(mock_db):
     """Test registration without body returns 422."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -78,6 +96,39 @@ async def test_register_agent_requires_body(mock_db):
 
 
 # ===== Submit Rating Tests =====
+
+@pytest.mark.asyncio
+async def test_verify_auth_uses_key_prefix(mock_db):
+    """Test verify_auth queries by key_prefix instead of full table scan."""
+    from auth import generate_api_key, hash_api_key
+    from main import verify_auth
+
+    test_key = generate_api_key()
+    test_hash = hash_api_key(test_key)
+    mock_db.return_value = [{'api_key_hash': test_hash, 'agent_type': 'claude-code'}]
+
+    result = await verify_auth(f"Bearer {test_key}")
+
+    assert result[0] == test_hash
+    assert result[1] == 'claude-code'
+    call_args = mock_db.call_args
+    sql = call_args[0][0]
+    assert 'key_prefix' in sql
+    assert call_args[0][1] == (test_key[:10],)
+
+
+@pytest.mark.asyncio
+async def test_verify_auth_invalid_prefix(mock_db):
+    """Test verify_auth raises 401 when no matching key_prefix found."""
+    from main import verify_auth
+
+    mock_db.return_value = []
+
+    with pytest.raises(HTTPException) as exc_info:
+        await verify_auth("Bearer ek_nonexistent_key_1234567890123")
+
+    assert exc_info.value.status_code == 401
+
 
 @pytest.mark.asyncio
 async def test_submit_rating_without_auth():

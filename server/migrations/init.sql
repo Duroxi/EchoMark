@@ -34,8 +34,10 @@ CREATE TABLE IF NOT EXISTS agents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agent_type VARCHAR(255) NOT NULL,
     api_key_hash VARCHAR(255) NOT NULL,
+    key_prefix VARCHAR(10) NOT NULL,
     timestamp TIMESTAMP DEFAULT NOW()
 );
 
--- Create index for fast auth lookup
+-- Create indexes for fast auth lookup
 CREATE INDEX IF NOT EXISTS idx_agents_api_key_hash ON agents(api_key_hash);
+CREATE INDEX IF NOT EXISTS idx_agents_key_prefix ON agents(key_prefix);

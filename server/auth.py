@@ -1,7 +1,7 @@
 import bcrypt
 import secrets
 import base64
-from config import API_KEY_LENGTH, API_KEY_PREFIX
+from config import API_KEY_LENGTH, API_KEY_PREFIX, KEY_PREFIX_LEN
 
 def generate_api_key() -> str:
     """Generate a new API key: ek_ + 32 char Base64 URL-safe."""
@@ -22,3 +22,7 @@ def extract_key_from_header(authorization: str) -> str:
     if not authorization.startswith("Bearer "):
         return None
     return authorization[7:]
+
+def extract_key_prefix(api_key: str) -> str:
+    """Extract prefix from API key for fast DB lookup."""
+    return api_key[:KEY_PREFIX_LEN]

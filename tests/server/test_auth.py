@@ -2,7 +2,7 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'server'))
 
-from auth import generate_api_key, hash_api_key, verify_api_key, extract_key_from_header
+from auth import generate_api_key, hash_api_key, verify_api_key, extract_key_from_header, extract_key_prefix
 
 def test_generate_api_key():
     key = generate_api_key()
@@ -18,3 +18,10 @@ def test_hash_and_verify():
 def test_extract_key_from_header():
     assert extract_key_from_header("Bearer ek_abc123") == "ek_abc123"
     assert extract_key_from_header("Basic abc") is None
+
+def test_extract_key_prefix():
+    key = generate_api_key()
+    prefix = extract_key_prefix(key)
+    assert prefix == key[:10]
+    assert prefix.startswith("ek_")
+    assert len(prefix) == 10

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from auth import generate_api_key, hash_api_key, verify_api_key, extract_key_from_header
+from auth import generate_api_key, hash_api_key, verify_api_key, extract_key_from_header, extract_key_prefix
 from models import AgentRegisterRequest, AgentRegisterResponse, RatingSubmit, RatingResponse, ToolStatsResponse
 from db import execute_sql
 
@@ -34,9 +34,10 @@ async def general_exception_handler(request, exc):
 def register_agent(req: AgentRegisterRequest):
     api_key = generate_api_key()
     key_hash = hash_api_key(api_key)
+    key_prefix = extract_key_prefix(api_key)
     execute_sql(
-        "INSERT INTO agents (agent_type, api_key_hash) VALUES (%s, %s) RETURNING id",
-        (req.agent_type, key_hash),
+        "INSERT INTO agents (agent_type, api_key_hash, key_prefix) VALUES (%s, %s, %s) RETURNING id",
+        (req.agent_type, key_hash, key_prefix),
         fetch_one=True
     )
     return AgentRegisterResponse(api_key=api_key, agent_type=req.agent_type)
@@ -46,12 +47,15 @@ async def verify_auth(authorization: str = Header(...)):
     if not api_key:
         raise HTTPException(status_code=401, detail="Invalid authorization header")
 
-    agents = execute_sql(
-        "SELECT api_key_hash, agent_type FROM agents",
+    key_prefix = extract_key_prefix(api_key)
+
+    candidates = execute_sql(
+        "SELECT api_key_hash, agent_type FROM agents WHERE key_prefix = %s",
+        (key_prefix,),
         fetch_all=True
     )
 
-    for agent in agents:
+    for agent in candidates:
         if verify_api_key(api_key, agent['api_key_hash']):
             return agent['api_key_hash'], agent['agent_type']
 
