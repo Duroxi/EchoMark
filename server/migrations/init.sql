@@ -38,6 +38,5 @@ CREATE TABLE IF NOT EXISTS agents (
     timestamp TIMESTAMP DEFAULT NOW()
 );
 
--- Create indexes for fast auth lookup
-CREATE INDEX IF NOT EXISTS idx_agents_api_key_hash ON agents(api_key_hash);
+-- Create index for fast auth lookup
 CREATE INDEX IF NOT EXISTS idx_agents_key_prefix ON agents(key_prefix);
