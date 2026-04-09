@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'server'))
 
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 from httpx import ASGITransport, AsyncClient
 from fastapi import HTTPException
 from fastapi.exceptions import RequestValidationError
@@ -21,8 +21,7 @@ def mock_db():
 
 @pytest.fixture
 def mock_verify_auth():
-    """Mock verify_auth to return (api_key_hash, agent_type)."""
-    with patch('main.verify_auth', new_callable=AsyncMock) as mock:
+    with patch('main.verify_auth') as mock:
         mock.return_value = ('$2b$12$mock_hash_value_placeholder', 'claude-code')
         yield mock
 
@@ -99,7 +98,6 @@ async def test_register_agent_requires_body(mock_db):
 
 @pytest.mark.asyncio
 async def test_verify_auth_uses_key_prefix(mock_db):
-    """Test verify_auth queries by key_prefix instead of full table scan."""
     from auth import generate_api_key, hash_api_key
     from main import verify_auth
 
@@ -107,7 +105,7 @@ async def test_verify_auth_uses_key_prefix(mock_db):
     test_hash = hash_api_key(test_key)
     mock_db.return_value = [{'api_key_hash': test_hash, 'agent_type': 'claude-code'}]
 
-    result = await verify_auth(f"Bearer {test_key}")
+    result = verify_auth(f"Bearer {test_key}")
 
     assert result[0] == test_hash
     assert result[1] == 'claude-code'
@@ -119,13 +117,12 @@ async def test_verify_auth_uses_key_prefix(mock_db):
 
 @pytest.mark.asyncio
 async def test_verify_auth_invalid_prefix(mock_db):
-    """Test verify_auth raises 401 when no matching key_prefix found."""
     from main import verify_auth
 
     mock_db.return_value = []
 
     with pytest.raises(HTTPException) as exc_info:
-        await verify_auth("Bearer ek_nonexistent_key_1234567890123")
+        verify_auth("Bearer ek_nonexistent_key_1234567890123")
 
     assert exc_info.value.status_code == 401
 

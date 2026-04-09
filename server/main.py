@@ -42,7 +42,7 @@ def register_agent(req: AgentRegisterRequest):
     )
     return AgentRegisterResponse(api_key=api_key, agent_type=req.agent_type)
 
-async def verify_auth(authorization: str = Header(...)):
+def verify_auth(authorization: str = Header(...)):
     api_key = extract_key_from_header(authorization)
     if not api_key:
         raise HTTPException(status_code=401, detail="Invalid authorization header")
@@ -62,8 +62,8 @@ async def verify_auth(authorization: str = Header(...)):
     raise HTTPException(status_code=401, detail="Invalid API key")
 
 @app.post("/api/v1/ratings", response_model=RatingResponse)
-async def submit_rating(rating: RatingSubmit, authorization: str = Header(...)):
-    api_key_hash, _ = await verify_auth(authorization)
+def submit_rating(rating: RatingSubmit, authorization: str = Header(...)):
+    api_key_hash, _ = verify_auth(authorization)
 
     overall = (
         rating.accuracy * 0.40 +
@@ -85,8 +85,8 @@ async def submit_rating(rating: RatingSubmit, authorization: str = Header(...)):
     return RatingResponse(id=str(rating_id), success=True, message="Rating submitted")
 
 @app.get("/api/v1/ratings/{tool_name}", response_model=ToolStatsResponse)
-async def get_rating(tool_name: str, authorization: str = Header(...)):
-    await verify_auth(authorization)
+def get_rating(tool_name: str, authorization: str = Header(...)):
+    verify_auth(authorization)
 
     result = execute_sql(
         """SELECT tool_name, total_ratings, avg_accuracy, avg_efficiency,
