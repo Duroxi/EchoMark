@@ -6,6 +6,7 @@ apscheduler==3.10.4
 passlib==1.7.4
 bcrypt==4.1.2
 PyYAML==6.0.1
+python-dotenv==1.0.1
 pytest==8.0.0
 pytest-asyncio==0.23.4
 httpx==0.26.0

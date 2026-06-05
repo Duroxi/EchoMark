@@ -1,7 +1,9 @@
-.worktrees/
-.claude/
-.vscode/
-__pycache__/
+# Environment
+.env
 *.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
 .coverage
-/testing/

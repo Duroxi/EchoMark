@@ -35,12 +35,18 @@ jobs:
           command_timeout: 5m
           script: |
             cd /home/ruoxi/EchoMark/server
+            
+            # 写入环境配置（从 GitHub Secrets 注入）
+            echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
+            
+            # 更新依赖
             source /home/ruoxi/envs/echomark/bin/activate
-            pip install fastapi uvicorn psycopg2-binary pydantic apscheduler passlib bcrypt PyYAML --quiet
-            python3 -m alembic upgrade head 2>/dev/null || true
+            pip install -r requirements.txt --quiet
+            
+            # 重启服务
             kill $(cat /home/ruoxi/echomark.pid 2>/dev/null) 2>/dev/null || true
             sleep 2
-            nohup /home/ruoxi/envs/echomark/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 9527 > /home/ruoxi/echomark.log 2>&1 &
+            nohup python3 -m uvicorn main:app --host 0.0.0.0 --port 9527 > /home/ruoxi/echomark.log 2>&1 &
             echo $! > /home/ruoxi/echomark.pid
             sleep 3
             curl -sf http://localhost:9527/docs > /dev/null && echo "✅ Deploy OK" || (echo "❌ FAILED" && tail -20 /home/ruoxi/echomark.log && exit 1)
