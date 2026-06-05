@@ -16,7 +16,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy to server via SSH
+      - name: Copy files to server via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "server/"
+          target: "/home/ruoxi/EchoMark/"
+          overwrite: true
+
+      - name: Deploy on server via SSH
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -27,21 +37,14 @@ jobs:
             set -e
             echo "🚀 Starting deployment..."
             
-            # 更新代码
-            cd /home/ruoxi/EchoMark
-            git fetch origin main
-            git reset --hard origin/main
-            echo "✅ Code updated"
-            
             # 更新依赖
+            cd /home/ruoxi/EchoMark/server
             source /home/ruoxi/envs/echomark/bin/activate
-            pip install -r server/requirements.txt --quiet
+            pip install -r requirements.txt --quiet
             echo "✅ Dependencies updated"
             
             # 运行数据库迁移
-            cd server
             python3 -m alembic upgrade head 2>/dev/null || echo "No migrations"
-            cd ..
             echo "✅ Migrations done"
             
             # 重启服务
@@ -49,18 +52,14 @@ jobs:
             sleep 2
             nohup /home/ruoxi/envs/echomark/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 9527 > /home/ruoxi/echomark.log 2>&1 &
             echo $! > /home/ruoxi/echomark.pid
-            echo "✅ Service restarted"
+            echo "✅ Service restarted (PID: $(cat /home/ruoxi/echomark.pid))"
             
             # 健康检查
             sleep 3
             if curl -sf http://localhost:9527/docs > /dev/null 2>&1; then
-              echo "✅ Health check passed!"
+              echo "✅ Health check passed! Deployment successful!"
             else
               echo "❌ Health check failed!"
               tail -20 /home/ruoxi/echomark.log
               exit 1
             fi
-
-      - name: Deployment result
-        if: failure()
-        run: echo "❌ Deployment failed! Check logs above."
