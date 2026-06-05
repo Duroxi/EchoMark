@@ -39,9 +39,9 @@ jobs:
             # 写入环境配置（从 GitHub Secrets 注入）
             echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
             
-            # 更新依赖
+            # 更新依赖（分开安装避免冲突）
             source /home/ruoxi/envs/echomark/bin/activate
-            pip install -r requirements.txt --quiet
+            pip install fastapi uvicorn psycopg2-binary pydantic apscheduler passlib bcrypt PyYAML python-dotenv --quiet
             
             # 重启服务
             kill $(cat /home/ruoxi/echomark.pid 2>/dev/null) 2>/dev/null || true
