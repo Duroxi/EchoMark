@@ -34,7 +34,6 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script_stop: true
           script: |
-            set -e
             echo "🚀 Starting deployment..."
             
             # 更新依赖（只安装生产依赖，跳过测试依赖冲突）
@@ -48,8 +47,7 @@ jobs:
             echo "✅ Migrations done"
             
             # 重启服务
-            pkill -f 'uvicorn main:app.*9527' 2>/dev/null || true
-            sleep 2
+            pkill -f 'uvicorn main:app.*9527' 2>/dev/null; sleep 2 || true
             nohup /home/ruoxi/envs/echomark/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 9527 > /home/ruoxi/echomark.log 2>&1 &
             echo $! > /home/ruoxi/echomark.pid
             echo "✅ Service restarted (PID: $(cat /home/ruoxi/echomark.pid))"
