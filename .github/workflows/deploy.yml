@@ -32,32 +32,15 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          script_stop: true
+          command_timeout: 5m
           script: |
-            echo "🚀 Starting deployment..."
-            
-            # 更新依赖（只安装生产依赖，跳过测试依赖冲突）
             cd /home/ruoxi/EchoMark/server
             source /home/ruoxi/envs/echomark/bin/activate
-            pip install fastapi uvicorn psycopg2-binary pydantic apscheduler passlib bcrypt PyYAML --quiet 2>/dev/null || pip install -r requirements.txt --quiet
-            echo "✅ Dependencies updated"
-            
-            # 运行数据库迁移
-            python3 -m alembic upgrade head 2>/dev/null || echo "No migrations"
-            echo "✅ Migrations done"
-            
-            # 重启服务
-            pkill -f 'uvicorn main:app.*9527' 2>/dev/null; sleep 2 || true
+            pip install fastapi uvicorn psycopg2-binary pydantic apscheduler passlib bcrypt PyYAML --quiet
+            python3 -m alembic upgrade head 2>/dev/null || true
+            kill $(cat /home/ruoxi/echomark.pid 2>/dev/null) 2>/dev/null || true
+            sleep 2
             nohup /home/ruoxi/envs/echomark/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 9527 > /home/ruoxi/echomark.log 2>&1 &
             echo $! > /home/ruoxi/echomark.pid
-            echo "✅ Service restarted (PID: $(cat /home/ruoxi/echomark.pid))"
-            
-            # 健康检查
             sleep 3
-            if curl -sf http://localhost:9527/docs > /dev/null 2>&1; then
-              echo "✅ Health check passed! Deployment successful!"
-            else
-              echo "❌ Health check failed!"
-              tail -20 /home/ruoxi/echomark.log
-              exit 1
-            fi
+            curl -sf http://localhost:9527/docs > /dev/null && echo "✅ Deploy OK" || (echo "❌ FAILED" && tail -20 /home/ruoxi/echomark.log && exit 1)
