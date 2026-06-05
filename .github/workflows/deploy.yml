@@ -37,10 +37,10 @@ jobs:
             set -e
             echo "🚀 Starting deployment..."
             
-            # 更新依赖
+            # 更新依赖（只安装生产依赖，跳过测试依赖冲突）
             cd /home/ruoxi/EchoMark/server
             source /home/ruoxi/envs/echomark/bin/activate
-            pip install -r requirements.txt --quiet
+            pip install fastapi uvicorn psycopg2-binary pydantic apscheduler passlib bcrypt PyYAML --quiet 2>/dev/null || pip install -r requirements.txt --quiet
             echo "✅ Dependencies updated"
             
             # 运行数据库迁移
